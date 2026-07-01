@@ -1,0 +1,17 @@
+---
+Checks: >
+  -*,
+  bugprone-*,
+  clang-analyzer-*,
+  cppcoreguidelines-*,
+  performance-*,
+  readability-*,
+  modernize-*,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-bounds-constant-array-index,
+  -readability-magic-numbers,
+  -readability-identifier-length
+HeaderFilterRegex: '^(?!build/).*$'
+FormatStyle: llvm
