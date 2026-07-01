@@ -1,2 +1,3 @@
 build/
 __*/
+compile_commands.json
