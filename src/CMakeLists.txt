@@ -3,5 +3,5 @@ add_library(moba_sim STATIC
 )
 
 target_include_directories(moba_sim PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/include
 )
