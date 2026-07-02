@@ -28,6 +28,8 @@ inline std::string statToString(Stat stat);
 struct Source {
   std::string name;
   std::string description;
+
+  bool operator==(const Source &) const = default;
 };
 
 struct Modifier {
@@ -63,7 +65,7 @@ public:
   void replace(const Stat &stat, const ModType &type, const Type &value,
                const Source &source) {
     auto it = std::ranges::find_if(mods_, [&](const Modifier &m) {
-      return m.stat == stat && m.type == type && m.source.name == source.name;
+      return m.stat == stat && m.type == type && m.source == source;
     });
     if (it != mods_.end()) {
       it->value = value;
@@ -74,9 +76,9 @@ public:
   }
 
   // Remove all modifiers from a given source (e.g. when unequipping an item).
-  [[nodiscard]] bool removeBySource(const std::string &source) {
+  [[nodiscard]] bool removeBySource(const Source &source) {
     auto [first, last] = std::ranges::remove_if(
-        mods_, [&](const Modifier &m) { return m.source.name == source; });
+        mods_, [&](const Modifier &m) { return m.source == source; });
     if (first == last) {
       return false;
     }
