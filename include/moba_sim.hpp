@@ -63,22 +63,13 @@ public:
 
   // Insert or update a modifier matching (stat, type, source).
   void replace(const Stat &stat, const ModType &type, const Type &value,
-               const Source &source) {
-    auto it = std::ranges::find_if(mods_, [&](const Modifier &m) {
-      return m.stat == stat && m.type == type && m.source == source;
-    });
-    if (it != mods_.end()) {
-      it->value = value;
-    } else {
-      mods_.push_back(
-          {.stat = stat, .type = type, .value = value, .source = source});
-    }
-  }
+               const Source &source);
 
   // Remove all modifiers from a given source (e.g. when unequipping an item).
   [[nodiscard]] bool removeBySource(const Source &source) {
-    auto [first, last] = std::ranges::remove_if(
-        mods_, [&](const Modifier &m) { return m.source == source; });
+    auto [first, last] = std::ranges::remove_if(mods_, [&](const Modifier &m) {
+      return m.source == source;
+    });
     if (first == last) {
       return false;
     }

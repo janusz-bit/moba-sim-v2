@@ -29,7 +29,8 @@ inline std::string statToString(Stat stat) {
 }
 
 [[nodiscard]] Type ModDB::getSumStat(
-    Stat stat, const std::function<bool(const Modifier &)> &predicate) const {
+    const Stat &stat,
+    const std::function<bool(const Modifier &)> &predicate) const {
   Type total = 0.0;
   for (const auto &m : mods_) {
     if (predicate(m) && m.stat == stat && m.type == ModType::Base) {
@@ -39,7 +40,8 @@ inline std::string statToString(Stat stat) {
   return total;
 }
 [[nodiscard]] Type ModDB::getIncStat(
-    Stat stat, const std::function<bool(const Modifier &)> &predicate) const {
+    const Stat &stat,
+    const std::function<bool(const Modifier &)> &predicate) const {
   Type total = 1.0;
   for (const auto &m : mods_) {
     if (predicate(m) && m.stat == stat && m.type == ModType::Inc) {
@@ -49,7 +51,8 @@ inline std::string statToString(Stat stat) {
   return total;
 }
 [[nodiscard]] Type ModDB::getMoreStat(
-    Stat stat, const std::function<bool(const Modifier &)> &predicate) const {
+    const Stat &stat,
+    const std::function<bool(const Modifier &)> &predicate) const {
   Type total = 1.0;
   for (const auto &m : mods_) {
     if (predicate(m) && m.stat == stat && m.type == ModType::Inc) {
@@ -58,5 +61,16 @@ inline std::string statToString(Stat stat) {
   }
   return total;
 }
-
+void ModDB::replace(const Stat &stat, const ModType &type, const Type &value,
+                    const Source &source) {
+  auto it = std::ranges::find_if(mods_, [&](const Modifier &m) {
+    return m.stat == stat && m.type == type && m.source == source;
+  });
+  if (it != mods_.end()) {
+    it->value = value;
+  } else {
+    mods_.push_back(
+        {.stat = stat, .type = type, .value = value, .source = source});
+  }
+}
 } // namespace moba
