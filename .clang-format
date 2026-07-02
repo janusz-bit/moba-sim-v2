@@ -1,2 +1,5 @@
 ---
 BasedOnStyle: llvm
+BinPackArguments: false
+AllowAllArgumentsOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false
