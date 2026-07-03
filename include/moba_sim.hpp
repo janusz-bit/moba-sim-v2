@@ -73,4 +73,9 @@ public:
                             [](const auto &) { return true; }) const;
 };
 
+class Champion {
+  std::string name;
+  ModDB mod_db;
+};
+
 } // namespace moba
