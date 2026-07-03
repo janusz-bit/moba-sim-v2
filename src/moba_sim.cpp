@@ -1,5 +1,5 @@
 #include "moba_sim.hpp"
-
+#include <algorithm>
 namespace moba {
 
 Type post_mitigation_damage(const Type &raw_damage,
