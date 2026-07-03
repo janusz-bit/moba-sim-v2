@@ -104,12 +104,12 @@ void ModDB::replace(const Stat &stat, const ModType &type, const Type &value,
 
 void Champion::getBaseStats() {
   for (std::size_t i = 0; i < std::to_underlying(Stat::Count); ++i) {
-    stats_[i] = mod_db_.getStat(static_cast<Stat>(i));
+    stats[i] = mod_db.getStat(static_cast<Stat>(i));
   }
 }
 Champion::Stats Champion::applyPassives(const Stats &base, const Stats &final) {
   Stats result = final;
-  for (const auto &passive : passives_) {
+  for (const auto &passive : passives) {
     result = passive(base, final);
   }
   return result;

@@ -80,9 +80,9 @@ struct Champion {
   using Stats = std::array<Type, std::to_underlying(Stat::Count)>;
   using Passive = std::function<Stats(const Stats &base, const Stats &final)>;
   using Passives = std::vector<Passive>;
-  ModDB mod_db_;
-  Stats stats_{};
-  Passives passives_{};
+  ModDB mod_db;
+  Stats stats{};
+  Passives passives{};
 
 
   void getBaseStats();
@@ -94,8 +94,8 @@ struct Champion {
 
   void evaluateChampion() {
     getBaseStats();
-    const Stats base = stats_;
-    Stats final = stats_;
+    const Stats base = stats;
+    Stats final = stats;
     final = applyPassives(base, final);
 
     Type delta = getDeltaStats(base, final);
@@ -105,7 +105,7 @@ struct Champion {
         delta = getDeltaStats(final_now, final);
         final = final_now;
     }
-    stats_ = final;
+    stats = final;
   }
 };
 
