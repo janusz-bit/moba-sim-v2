@@ -51,7 +51,7 @@ public:
 
   void remove(const Stat &stat, const ModType &type, const Source &source);
 
-  void remove(std::function<bool(const Modifier &)> predicate);
+  void remove(const std::function<bool(const Modifier &)> &predicate);
 
   // Insert or update a modifier matching (stat, type, source).
   void replace(const Stat &stat, const ModType &type, const Type &value,

@@ -42,8 +42,8 @@ void ModDB::remove(const Stat &stat, const ModType &type,
     mods_.erase(it);
   }
 }
-void ModDB::remove(std::function<bool(const Modifier &)> predicate) {
-  auto [it, end] = std::ranges::remove_if(mods_, std::move(predicate));
+void ModDB::remove(const std::function<bool(const Modifier &)> &predicate) {
+  auto [it, end] = std::ranges::remove_if(mods_, predicate);
   mods_.erase(it, end);
 }
 
