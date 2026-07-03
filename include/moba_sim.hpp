@@ -68,6 +68,10 @@ public:
   [[nodiscard]] Type getMoreStat(
       const Stat &stat, const std::function<bool(const Modifier &)> &predicate =
                             [](const auto &) { return true; }) const;
+
+  [[nodiscard]] Type getStat(
+      const Stat &stat, const std::function<bool(const Modifier &)> &predicate =
+                            [](const auto &) { return true; }) const;
 };
 
 } // namespace moba

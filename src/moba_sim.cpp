@@ -80,6 +80,13 @@ void ModDB::remove(std::function<bool(const Modifier &)> predicate) {
   }
   return total;
 }
+[[nodiscard]] Type
+ModDB::getStat(const Stat &stat,
+               const std::function<bool(const Modifier &)> &predicate) const {
+  return getSumStat(stat, predicate) * getIncStat(stat, predicate) *
+         getMoreStat(stat, predicate);
+}
+
 void ModDB::replace(const Stat &stat, const ModType &type, const Type &value,
                     const Source &source) {
   auto it = std::ranges::find_if(mods_, [&](const Modifier &m) {
