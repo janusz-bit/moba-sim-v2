@@ -20,10 +20,12 @@ inline std::string statToString(Stat stat) {
     return "AD";
   case Stat::MS:
     return "MS";
-  case Stat::Armor:
+  case Stat::AR:
     return "Armor";
   case Stat::MR:
     return "MR";
+  case Stat::CDR:
+    return "CDR";
   }
   return "Unknown";
 }

@@ -13,7 +13,7 @@ using Type = double;
 Type post_mitigation_damage(const Type &raw_damage,
                             const Type &resistanse) noexcept;
 
-enum class Stat : std::uint8_t { HP, AP, AD, MS, Armor, MR };
+enum class Stat : std::uint8_t { HP, AP, AD, MS, AR, MR, CDR };
 enum class ModType : std::uint8_t {
   Base, // 10 + 20 + 30
   Inc,  // 1.1 + 1.2 + 1.3
