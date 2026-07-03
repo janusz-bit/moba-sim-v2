@@ -76,7 +76,7 @@ void ModDB::remove(const std::function<bool(const Modifier &)> &predicate) {
     const std::function<bool(const Modifier &)> &predicate) const {
   Type total = 1.0;
   for (const auto &m : mods_) {
-    if (predicate(m) && m.stat == stat && m.type == ModType::Inc) {
+    if (predicate(m) && m.stat == stat && m.type == ModType::More) {
       total *= m.value;
     }
   }
@@ -104,21 +104,21 @@ void ModDB::replace(const Stat &stat, const ModType &type, const Type &value,
 
 void Champion::getBaseStats() {
   for (std::size_t i = 0; i < std::to_underlying(Stat::Count); ++i) {
-    stats[i] = mod_db.getStat(static_cast<Stat>(i));
+    stats_[i] = mod_db_.getStat(static_cast<Stat>(i));
   }
 }
 Champion::Stats Champion::applyPassives(const Stats &base, const Stats &final) {
   Stats result = final;
-  for (const auto &passive : passives) {
+  for (const auto &passive : passives_) {
     result = passive(base, final);
   }
   return result;
 }
-[[nodiscard]] Type Champion::getDeltaStats(const Stats &base,
-                                           const Stats &final) {
+[[nodiscard]] Type Champion::getDeltaStats(const Stats &stats1,
+                                           const Stats &stats2) {
   Type delta = 0;
   for (std::size_t i = 0; i < std::to_underlying(Stat::Count); ++i) {
-    Type delta_now = std::abs(final[i] - base[i]);
+    Type delta_now = std::abs(stats2[i] - stats1[i]);
     delta = std::max(delta_now, delta);
   }
   return delta;
