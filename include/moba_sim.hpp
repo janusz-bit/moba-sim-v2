@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 namespace moba {
 using Type = double;
@@ -33,21 +34,28 @@ struct Source {
 };
 
 struct Modifier {
-  Stat stat;
-  ModType type;
-  Type value;
-  Source source;
+  Stat stat{};
+  ModType type{};
+  Type value{};
+  Source source{};
 };
 
 class ModDB {
   std::vector<Modifier> mods_;
 
 public:
+  [[nodiscard]] const std::vector<Modifier> &get_mods() const { return mods_; }
+
   void add(const Stat &stat, const ModType &type, const Type &value,
-           const Source &source) {
-    mods_.push_back(
-        {.stat = stat, .type = type, .value = value, .source = source});
-  }
+           const Source &source);
+
+  void remove(const Stat &stat, const ModType &type, const Source &source);
+
+  void remove(std::function<bool(const Modifier &)> predicate);
+
+  // Insert or update a modifier matching (stat, type, source).
+  void replace(const Stat &stat, const ModType &type, const Type &value,
+               const Source &source);
 
   [[nodiscard]] Type getSumStat(
       const Stat &stat, const std::function<bool(const Modifier &)> &predicate =
@@ -60,38 +68,6 @@ public:
   [[nodiscard]] Type getMoreStat(
       const Stat &stat, const std::function<bool(const Modifier &)> &predicate =
                             [](const auto &) { return true; }) const;
-
-  // Insert or update a modifier matching (stat, type, source).
-  void replace(const Stat &stat, const ModType &type, const Type &value,
-               const Source &source);
-
-  // Remove all modifiers from a given source (e.g. when unequipping an item).
-  [[nodiscard]] bool removeBySource(const Source &source) {
-    auto [first, last] = std::ranges::remove_if(mods_, [&](const Modifier &m) {
-      return m.source == source;
-    });
-    if (first == last) {
-      return false;
-    }
-
-    mods_.erase(first, last);
-    return true;
-  }
-
-  // Get the BASE modifier value for stat that comes specifically from source
-  // "Base". Used to separate natural base stats from bonus stats (e.g. bonus HP
-  // for conversions).
-  [[nodiscard]] double getBaseFromSource(Stat stat) const {
-    for (const auto &m : mods_) {
-      if (m.stat == stat && m.type == ModType::Base &&
-          m.source.name == "Base") {
-        return m.value;
-      }
-    }
-    return 0.0;
-  }
-
-  [[nodiscard]] const std::vector<Modifier> &mods() const { return mods_; }
 };
 
 } // namespace moba

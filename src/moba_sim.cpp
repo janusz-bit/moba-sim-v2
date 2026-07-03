@@ -28,6 +28,25 @@ inline std::string statToString(Stat stat) {
   return "Unknown";
 }
 
+void ModDB::add(const Stat &stat, const ModType &type, const Type &value,
+                const Source &source) {
+  mods_.push_back(
+      {.stat = stat, .type = type, .value = value, .source = source});
+}
+void ModDB::remove(const Stat &stat, const ModType &type,
+                   const Source &source) {
+  auto it = std::ranges::find_if(mods_, [&](const Modifier &m) {
+    return m.stat == stat && m.type == type && m.source == source;
+  });
+  if (it != mods_.end()) {
+    mods_.erase(it);
+  }
+}
+void ModDB::remove(std::function<bool(const Modifier &)> predicate) {
+  auto [it, end] = std::ranges::remove_if(mods_, std::move(predicate));
+  mods_.erase(it, end);
+}
+
 [[nodiscard]] Type ModDB::getSumStat(
     const Stat &stat,
     const std::function<bool(const Modifier &)> &predicate) const {
@@ -73,4 +92,5 @@ void ModDB::replace(const Stat &stat, const ModType &type, const Type &value,
         {.stat = stat, .type = type, .value = value, .source = source});
   }
 }
+
 } // namespace moba
