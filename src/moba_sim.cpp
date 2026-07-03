@@ -102,4 +102,26 @@ void ModDB::replace(const Stat &stat, const ModType &type, const Type &value,
   }
 }
 
+void Champion::getBaseStats() {
+  for (std::size_t i = 0; i < std::to_underlying(Stat::Count); ++i) {
+    stats[i] = mod_db.getStat(static_cast<Stat>(i));
+  }
+}
+Champion::Stats Champion::applyPassives(const Stats &base, const Stats &final) {
+  Stats result = final;
+  for (const auto &passive : passives) {
+    result = passive(base, final);
+  }
+  return result;
+}
+[[nodiscard]] Type Champion::getDeltaStats(const Stats &base,
+                                           const Stats &final) {
+  Type delta = 0;
+  for (std::size_t i = 0; i < std::to_underlying(Stat::Count); ++i) {
+    Type delta_now = std::abs(final[i] - base[i]);
+    delta = std::max(delta_now, delta);
+  }
+  return delta;
+}
+
 } // namespace moba
