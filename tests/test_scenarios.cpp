@@ -121,3 +121,17 @@ TEST_CASE("Scenario: full pipeline ModDB + passives", "[scenario]") {
   Stats result = moba::evaluateChampion(champ, 0.0001);
   REQUIRE(result[std::to_underlying(Stat::AD)] == Catch::Approx(160.0).epsilon(0.001));
 }
+
+TEST_CASE("Scenario: non-converging passive throws ConvergenceError",
+          "[scenario]") {
+  Champion champ;
+  champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
+  champ.passives.push_back([](const Stats &, const Stats &final) {
+    Stats bonus{};
+    bonus[std::to_underlying(Stat::AD)] = final[std::to_underlying(Stat::AD)] * 1.5;
+    return bonus;
+  });
+  // Weight 1.5 ≥ 1 → diverges, should throw after max_iter
+  REQUIRE_THROWS_AS(moba::evaluateChampion(champ, 0.01, 5),
+                    moba::ConvergenceError);
+}
