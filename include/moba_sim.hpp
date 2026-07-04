@@ -81,32 +81,16 @@ struct Champion {
   using Passive = std::function<Stats(const Stats &base, const Stats &final)>;
   using Passives = std::vector<Passive>;
   ModDB mod_db;
-  Stats stats{};
-  Passives passives{};
+  Passives passives;
 
-
-  void getBaseStats();
+  [[nodiscard]] Stats getBaseStats() const;
 
   Stats applyPassives(const Stats &base, const Stats &final);
 
   [[nodiscard]] static Type getDeltaStats(const Stats &stats1,
                                           const Stats &stats2);
 
-  void evaluateChampion() {
-    getBaseStats();
-    const Stats base = stats;
-    Stats final = stats;
-    final = applyPassives(base, final);
-
-    Type delta = getDeltaStats(base, final);
-    Stats final_now = final;
-    while (delta > 0.01) {
-        final_now = applyPassives(base, final_now);
-        delta = getDeltaStats(final_now, final);
-        final = final_now;
-    }
-    stats = final;
-  }
+  Stats evaluateChampion();
 };
 
 } // namespace moba
