@@ -5,6 +5,7 @@ add_executable(moba_sim_tests
     test_post_mitigation_damage.cpp
     test_mod_db.cpp
     test_champion.cpp
+    test_scenarios.cpp
 )
 
 target_link_libraries(moba_sim_tests
