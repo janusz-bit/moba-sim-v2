@@ -2,6 +2,16 @@
 #include <algorithm>
 namespace moba {
 
+namespace {
+Champion::Stats addStats(const Champion::Stats &a, const Champion::Stats &b) {
+  Champion::Stats out{};
+  for (std::size_t i = 0; i < std::to_underlying(Stat::Count); ++i) {
+    out[i] = a[i] + b[i];
+  }
+  return out;
+}
+} // namespace
+
 Type post_mitigation_damage(const Type &raw_damage,
                             const Type &resistanse) noexcept {
   if (resistanse >= 0) {
@@ -109,12 +119,13 @@ void ModDB::replace(const Stat &stat, const ModType &type, const Type &value,
   }
   return stats;
 }
-Champion::Stats Champion::applyPassives(const Stats &base, const Stats &final) {
-  Stats result = final;
+Champion::Stats Champion::applyPassives(const Stats &base,
+                                        const Stats &final) const {
+  Stats bonus{};
   for (const auto &passive : passives) {
-    result = passive(base, final);
+    bonus = addStats(bonus, passive(base, final));
   }
-  return result;
+  return addStats(base, bonus);
 }
 [[nodiscard]] Type Champion::getDeltaStats(const Stats &stats1,
                                            const Stats &stats2) {
@@ -125,19 +136,14 @@ Champion::Stats Champion::applyPassives(const Stats &base, const Stats &final) {
   }
   return delta;
 }
-Champion::Stats Champion::evaluateChampion() {
-  Stats stats = getBaseStats();
-  const Stats base = stats;
-  Stats final = stats;
-  final = applyPassives(base, final);
-
-  Type delta = getDeltaStats(base, final);
-  Stats final_now = final;
-  while (delta > 0.01) {
-    final_now = applyPassives(base, final_now);
-    delta = getDeltaStats(final_now, final);
-    final = final_now;
-  }
+Champion::Stats evaluateChampion(const Champion &champion, Type eps) {
+  const Champion::Stats base = champion.getBaseStats();
+  Champion::Stats final = base;
+  Champion::Stats prev = base;
+  do {
+    prev = final;
+    final = champion.applyPassives(base, prev);
+  } while (Champion::getDeltaStats(final, prev) > eps);
   return final;
 }
 
