@@ -1,5 +1,6 @@
 #include "moba_sim.hpp"
 #include <algorithm>
+#include <stdexcept>
 namespace moba {
 
 namespace {
@@ -36,8 +37,10 @@ inline std::string statToString(Stat stat) {
     return "MR";
   case Stat::CDR:
     return "CDR";
+  case Stat::Count:
+    throw std::invalid_argument("Invalid stat");
   }
-  return "Unknown";
+  throw std::invalid_argument("Invalid stat");
 }
 
 void ModDB::add(const Stat &stat, const ModType &type, const Type &value,
