@@ -1,8 +1,6 @@
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <functional>
 #include <string>
 #include <utility>
