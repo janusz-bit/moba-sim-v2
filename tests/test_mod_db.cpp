@@ -8,7 +8,6 @@ using moba::Modifier;
 using moba::ModType;
 using moba::Source;
 using moba::Stat;
-using moba::Type;
 
 TEST_CASE("ModDB add stores modifiers", "[mod_db]") {
   ModDB db;

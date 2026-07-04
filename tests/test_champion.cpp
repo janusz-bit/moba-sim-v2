@@ -5,11 +5,9 @@
 #include "moba_sim.hpp"
 
 using moba::Champion;
-using moba::ModDB;
 using moba::ModType;
 using moba::Source;
 using moba::Stat;
-using moba::Type;
 using Stats = Champion::Stats;
 
 TEST_CASE("Champion getBaseStats with empty mod_db returns all zeros",
