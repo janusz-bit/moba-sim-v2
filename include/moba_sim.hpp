@@ -78,6 +78,9 @@ public:
 
 struct Champion {
   using Stats = std::array<Type, std::to_underlying(Stat::Count)>;
+  // Passive returns a *bonus* (delta): only stats it adds, others = 0.
+  // Computed from (base, final); passives are independent within one
+  // applyPassives call (order does not matter).
   using Passive = std::function<Stats(const Stats &base, const Stats &final)>;
   using Passives = std::vector<Passive>;
   ModDB mod_db;
@@ -85,12 +88,14 @@ struct Champion {
 
   [[nodiscard]] Stats getBaseStats() const;
 
-  Stats applyPassives(const Stats &base, const Stats &final);
+  [[nodiscard]] Stats applyPassives(const Stats &base,
+                                    const Stats &final) const;
 
   [[nodiscard]] static Type getDeltaStats(const Stats &stats1,
                                           const Stats &stats2);
-
-  Stats evaluateChampion();
 };
+
+[[nodiscard]] Champion::Stats evaluateChampion(const Champion &champion,
+                                               Type eps = 0.01);
 
 } // namespace moba
