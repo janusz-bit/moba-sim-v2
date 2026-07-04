@@ -13,3 +13,6 @@ if(CMAKE_EXPORT_COMPILE_COMMANDS)
 endif()
 
 add_subdirectory(src)
+
+enable_testing()
+add_subdirectory(tests)

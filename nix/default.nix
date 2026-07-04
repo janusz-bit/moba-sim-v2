@@ -40,6 +40,7 @@
             clang-tools
             lldb
             boost
+            catch2_3
           ]);
       };
     };
