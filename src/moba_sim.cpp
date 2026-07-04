@@ -48,6 +48,7 @@ void ModDB::add(const Stat &stat, const ModType &type, const Type &value,
   mods_.push_back(
       {.stat = stat, .type = type, .value = value, .source = source});
 }
+
 void ModDB::remove(const Stat &stat, const ModType &type,
                    const Source &source) {
   auto it = std::ranges::find_if(mods_, [&](const Modifier &m) {
@@ -57,6 +58,7 @@ void ModDB::remove(const Stat &stat, const ModType &type,
     mods_.erase(it);
   }
 }
+
 void ModDB::remove(const std::function<bool(const Modifier &)> &predicate) {
   auto [it, end] = std::ranges::remove_if(mods_, predicate);
   mods_.erase(it, end);
@@ -73,6 +75,7 @@ void ModDB::remove(const std::function<bool(const Modifier &)> &predicate) {
   }
   return total;
 }
+
 [[nodiscard]] Type ModDB::getIncStat(
     const Stat &stat,
     const std::function<bool(const Modifier &)> &predicate) const {
@@ -84,6 +87,7 @@ void ModDB::remove(const std::function<bool(const Modifier &)> &predicate) {
   }
   return total;
 }
+
 [[nodiscard]] Type ModDB::getMoreStat(
     const Stat &stat,
     const std::function<bool(const Modifier &)> &predicate) const {
@@ -95,6 +99,7 @@ void ModDB::remove(const std::function<bool(const Modifier &)> &predicate) {
   }
   return total;
 }
+
 [[nodiscard]] Type
 ModDB::getStat(const Stat &stat,
                const std::function<bool(const Modifier &)> &predicate) const {
@@ -122,6 +127,7 @@ void ModDB::replace(const Stat &stat, const ModType &type, const Type &value,
   }
   return stats;
 }
+
 Champion::Stats Champion::applyPassives(const Stats &base,
                                         const Stats &final) const {
   Stats bonus{};
@@ -130,6 +136,7 @@ Champion::Stats Champion::applyPassives(const Stats &base,
   }
   return addStats(base, bonus);
 }
+
 [[nodiscard]] Type Champion::getDeltaStats(const Stats &stats1,
                                            const Stats &stats2) {
   Type delta = 0;
@@ -139,6 +146,7 @@ Champion::Stats Champion::applyPassives(const Stats &base,
   }
   return delta;
 }
+
 Champion::Stats evaluateChampion(const Champion &champion, Type eps) {
   const Champion::Stats base = champion.getBaseStats();
   Champion::Stats final = base;
