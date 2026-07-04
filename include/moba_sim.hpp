@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -93,7 +95,13 @@ struct Champion {
                                           const Stats &stats2);
 };
 
+class ConvergenceError : public std::runtime_error {
+public:
+  explicit ConvergenceError(const std::string &msg) : std::runtime_error(msg) {}
+};
+
 [[nodiscard]] Champion::Stats evaluateChampion(const Champion &champion,
-                                               Type eps = 0.01);
+                                               Type eps = 0.01,
+                                               std::size_t max_iter = 1000);
 
 } // namespace moba
