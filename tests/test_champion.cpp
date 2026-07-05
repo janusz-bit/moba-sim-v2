@@ -131,7 +131,7 @@ TEST_CASE("Champion applyPassives is const-callable", "[champion]") {
 TEST_CASE("evaluateChampion with no passives returns base", "[champion]") {
   Champion champ;
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
-  Stats result = moba::evaluateChampion(champ);
+  Stats result = champ.evaluateChampion();
   REQUIRE(result[std::to_underlying(Stat::AD)] == Catch::Approx(50.0));
 }
 
@@ -144,7 +144,7 @@ TEST_CASE("evaluateChampion with constant-bonus passive converges in one step",
     bonus[std::to_underlying(Stat::AD)] = 10.0;
     return bonus;
   });
-  Stats result = moba::evaluateChampion(champ);
+  Stats result = champ.evaluateChampion();
   // 50 + 10 = 60, and second iteration: 50 + 10 = 60 (bonus doesn't depend on final)
   // so delta=0 after first step → converges immediately
   REQUIRE(result[std::to_underlying(Stat::AD)] == Catch::Approx(60.0));
@@ -161,7 +161,7 @@ TEST_CASE("evaluateChampion converges with final-dependent passive",
     return bonus;
   });
   // Fixed point: final = 50 + 0.1*final → final = 50/0.9 ≈ 55.5556
-  Stats result = moba::evaluateChampion(champ, 0.0001);
+  Stats result = champ.evaluateChampion(0.0001);
   REQUIRE(result[std::to_underlying(Stat::AD)] == Catch::Approx(55.5556).epsilon(0.001));
 }
 
@@ -174,8 +174,8 @@ TEST_CASE("evaluateChampion respects eps for tighter convergence",
     bonus[std::to_underlying(Stat::AD)] = final[std::to_underlying(Stat::AD)] * 0.1;
     return bonus;
   });
-  Stats loose = moba::evaluateChampion(champ, 0.1);
-  Stats tight = moba::evaluateChampion(champ, 0.00001);
+  Stats loose = champ.evaluateChampion(0.1);
+  Stats tight = champ.evaluateChampion(0.00001);
   // Both should be near the fixed point; tight should be closer
   double fixed_point = 50.0 / 0.9;
   REQUIRE(std::abs(tight[std::to_underlying(Stat::AD)] - fixed_point) <=

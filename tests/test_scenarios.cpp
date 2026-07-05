@@ -20,7 +20,7 @@ TEST_CASE("Scenario: no passives, mod_db only returns getBaseStats",
   // getBaseStats[AD] = 80 * 1.2 * 1.5 = 144
   Stats base = champ.getBaseStats();
   REQUIRE(base[std::to_underlying(Stat::AD)] == Catch::Approx(144.0));
-  Stats result = moba::evaluateChampion(champ);
+  Stats result = champ.evaluateChampion();
   // No passives → result == base, converges in one iteration
   REQUIRE(result[std::to_underlying(Stat::AD)] == Catch::Approx(144.0));
 }
@@ -35,7 +35,7 @@ TEST_CASE("Scenario: final-dependent passive converges to fixed point",
     return bonus;
   });
   // Fixed point: final = 50 + 0.1*final → final = 50/0.9 ≈ 55.5556
-  Stats result = moba::evaluateChampion(champ, 0.0001);
+  Stats result = champ.evaluateChampion(0.0001);
   REQUIRE(result[std::to_underlying(Stat::AD)] ==
           Catch::Approx(55.5556).epsilon(0.001));
   // Verify it's not just base
@@ -56,7 +56,7 @@ TEST_CASE("Scenario: cancelling passives return base", "[scenario]") {
     return bonus;
   });
   // +0.1*final and -0.1*final cancel → bonus = 0 → result = base = 300
-  Stats result = moba::evaluateChampion(champ);
+  Stats result = champ.evaluateChampion();
   REQUIRE(result[std::to_underlying(Stat::AP)] == Catch::Approx(300.0));
 }
 
@@ -74,7 +74,7 @@ TEST_CASE("Scenario: uneven weights reach non-base fixed point", "[scenario]") {
     return bonus;
   });
   // Net weight +0.1: final = 300 + 0.1*final → final = 300/0.9 ≈ 333.3333
-  Stats result = moba::evaluateChampion(champ, 0.0001);
+  Stats result = champ.evaluateChampion(0.0001);
   REQUIRE(result[std::to_underlying(Stat::AP)] ==
           Catch::Approx(333.3333).epsilon(0.001));
   // Verify it's not base
@@ -98,7 +98,7 @@ TEST_CASE("Scenario: cross-stat dependency bonus from one stat to another",
   // Iter 1: final = base + bonus = {HP:1000, AD:50} + {AD:10} = {HP:1000, AD:60}
   // Iter 2: final = base + bonus(final) = {HP:1000, AD:50} + {AD:0.01*1000=10} = {HP:1000, AD:60}
   // delta = 0 → converges, final[AD] = 60
-  Stats result = moba::evaluateChampion(champ, 0.0001);
+  Stats result = champ.evaluateChampion(0.0001);
   REQUIRE(result[std::to_underlying(Stat::HP)] == Catch::Approx(1000.0));
   REQUIRE(result[std::to_underlying(Stat::AD)] == Catch::Approx(60.0));
 }
@@ -118,7 +118,7 @@ TEST_CASE("Scenario: full pipeline ModDB + passives", "[scenario]") {
   // Fixed point: final = 144 + 0.1*final → final = 144/0.9 = 160
   Stats base = champ.getBaseStats();
   REQUIRE(base[std::to_underlying(Stat::AD)] == Catch::Approx(144.0));
-  Stats result = moba::evaluateChampion(champ, 0.0001);
+  Stats result = champ.evaluateChampion(0.0001);
   REQUIRE(result[std::to_underlying(Stat::AD)] == Catch::Approx(160.0).epsilon(0.001));
 }
 
@@ -132,6 +132,5 @@ TEST_CASE("Scenario: non-converging passive throws ConvergenceError",
     return bonus;
   });
   // Weight 1.5 ≥ 1 → diverges, should throw after max_iter
-  REQUIRE_THROWS_AS(moba::evaluateChampion(champ, 0.01, 5),
-                    moba::ConvergenceError);
+  REQUIRE_THROWS_AS(champ.evaluateChampion(0.01, 5), moba::ConvergenceError);
 }

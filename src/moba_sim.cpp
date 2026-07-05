@@ -147,22 +147,21 @@ Champion::Stats Champion::applyPassives(const Stats &base,
   return delta;
 }
 
-Champion::Stats evaluateChampion(const Champion &champion, Type eps,
-                                 std::size_t max_iter) {
-  const Champion::Stats base = champion.getBaseStats();
-  Champion::Stats final = base;
-  Champion::Stats prev = base;
+Champion::Stats Champion::evaluateChampion(Type eps, std::size_t max_iter) const {
+  const Stats base = getBaseStats();
+  Stats final = base;
+  Stats prev = base;
   std::size_t iter = 0;
   do {
     prev = final;
-    final = champion.applyPassives(base, prev);
+    final = applyPassives(base, prev);
     ++iter;
-  } while (Champion::getDeltaStats(final, prev) > eps && iter < max_iter);
-  if (iter >= max_iter && Champion::getDeltaStats(final, prev) > eps) {
+  } while (getDeltaStats(final, prev) > eps && iter < max_iter);
+  if (iter >= max_iter && getDeltaStats(final, prev) > eps) {
     throw ConvergenceError(
         "evaluateChampion did not converge after " + std::to_string(max_iter) +
         " iterations (eps=" + std::to_string(eps) + ", delta=" +
-        std::to_string(Champion::getDeltaStats(final, prev)) + ")");
+        std::to_string(getDeltaStats(final, prev)) + ")");
   }
   return final;
 }

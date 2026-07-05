@@ -80,6 +80,11 @@ public:
                             [](const auto &) { return true; }) const;
 };
 
+class ConvergenceError : public std::runtime_error {
+public:
+  explicit ConvergenceError(const std::string &msg) : std::runtime_error(msg) {}
+};
+
 struct Champion {
   using Stats = std::array<Type, std::to_underlying(Stat::Count)>;
   // Passive returns a *bonus* (delta): only stats it adds, others = 0.
@@ -96,16 +101,10 @@ struct Champion {
                                     const Stats &final) const;
 
   [[nodiscard]] static Type getDeltaStats(const Stats &stats1,
-                                          const Stats &stats2);
-};
+                                           const Stats &stats2);
 
-class ConvergenceError : public std::runtime_error {
-public:
-  explicit ConvergenceError(const std::string &msg) : std::runtime_error(msg) {}
+  [[nodiscard]] Stats evaluateChampion(Type eps = 0.01,
+                                       std::size_t max_iter = 1000) const;
 };
-
-[[nodiscard]] Champion::Stats evaluateChampion(const Champion &champion,
-                                               Type eps = 0.01,
-                                               std::size_t max_iter = 1000);
 
 } // namespace moba
