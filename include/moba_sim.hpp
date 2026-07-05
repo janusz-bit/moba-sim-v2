@@ -33,6 +33,11 @@ struct Source {
   std::string description;
 
   bool operator==(const Source &) const = default;
+  Source& operator=(const std::initializer_list<std::string> &list) {
+    name = list.begin()[0];
+    description = list.begin()[1];
+    return *this;
+  }
 };
 
 struct Modifier {
