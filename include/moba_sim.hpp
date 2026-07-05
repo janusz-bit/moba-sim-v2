@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -32,12 +33,10 @@ struct Source {
   std::string name;
   std::string description;
 
+  Source(std::initializer_list<std::string> list)
+      : name(list.begin()[0]), description(list.begin()[1]) {}
+
   bool operator==(const Source &) const = default;
-  Source& operator=(const std::initializer_list<std::string> &list) {
-    name = list.begin()[0];
-    description = list.begin()[1];
-    return *this;
-  }
 };
 
 struct Modifier {
