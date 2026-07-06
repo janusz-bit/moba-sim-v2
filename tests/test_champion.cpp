@@ -334,3 +334,206 @@ TEST_CASE("two temp passives are fully independent", "[champion]") {
   REQUIRE(champ.temp_passives.size() == 1);
   REQUIRE(r[std::to_underlying(Stat::AD)] == Catch::Approx(67.0)); // 50+10+7
 }
+
+// --- additional coverage tests ---
+
+TEST_CASE("multiple one-shot passives all apply and are consumed in one call",
+          "[champion]") {
+  Champion champ;
+  champ.one_shot_passives.push_back([](const Stats &, const Stats &, Type) {
+    Stats bonus{};
+    bonus[std::to_underlying(Stat::AD)] = 10.0;
+    return Champion::PassiveResult{bonus, false};
+  });
+  champ.one_shot_passives.push_back([](const Stats &, const Stats &, Type) {
+    Stats bonus{};
+    bonus[std::to_underlying(Stat::AD)] = 25.0;
+    return Champion::PassiveResult{bonus, false};
+  });
+  Stats base{};
+  base[std::to_underlying(Stat::AD)] = 50.0;
+  Stats r = champ.applyPassives(base, base);
+  // both applied once, both consumed
+  REQUIRE(r[std::to_underlying(Stat::AD)] == Catch::Approx(85.0)); // 50+10+25
+  REQUIRE(champ.one_shot_passives.empty());
+  // second call: no one-shot left
+  Stats r2 = champ.applyPassives(base, base);
+  REQUIRE(r2[std::to_underlying(Stat::AD)] == Catch::Approx(50.0));
+}
+
+TEST_CASE("one-shot passive with alive=true is still consumed", "[champion]") {
+  Champion champ;
+  // one-shot queue removes the passive regardless of the alive flag
+  champ.one_shot_passives.push_back([](const Stats &, const Stats &, Type) {
+    Stats bonus{};
+    bonus[std::to_underlying(Stat::AD)] = 10.0;
+    return Champion::PassiveResult{bonus, true}; // alive=true, but one-shot
+  });
+  Stats base{};
+  base[std::to_underlying(Stat::AD)] = 50.0;
+  champ.applyPassives(base, base);
+  REQUIRE(champ.one_shot_passives.empty());
+}
+
+TEST_CASE("temp passive returning alive=false on first call is removed after applying bonus",
+          "[champion]") {
+  Champion champ;
+  champ.temp_passives.push_back([](const Stats &, const Stats &, Type) {
+    Stats bonus{};
+    bonus[std::to_underlying(Stat::AD)] = 15.0;
+    return Champion::PassiveResult{bonus, false};
+  });
+  Stats base{};
+  base[std::to_underlying(Stat::AD)] = 50.0;
+  Stats r = champ.applyPassives(base, base, 0.0);
+  // bonus applied this iteration, then removed
+  REQUIRE(r[std::to_underlying(Stat::AD)] == Catch::Approx(65.0));
+  REQUIRE(champ.temp_passives.empty());
+  Stats r2 = champ.applyPassives(base, base, 1.0);
+  REQUIRE(r2[std::to_underlying(Stat::AD)] == Catch::Approx(50.0));
+}
+
+TEST_CASE("permanent passive can read base stats", "[champion]") {
+  Champion champ;
+  champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
+  // bonus = 10% of base AD (not final)
+  champ.passives.push_back([](const Stats &base, const Stats &, Type) {
+    Stats bonus{};
+    bonus[std::to_underlying(Stat::AD)] =
+        base[std::to_underlying(Stat::AD)] * 0.1;
+    return Champion::PassiveResult{bonus, true};
+  });
+  Stats base = champ.getBaseStats();
+  Stats r = champ.applyPassives(base, base);
+  // 50 + 5 = 55
+  REQUIRE(r[std::to_underlying(Stat::AD)] == Catch::Approx(55.0));
+}
+
+TEST_CASE("applyPassives default time is 0.0", "[champion]") {
+  Champion champ;
+  // temp that is alive while time < 1.0
+  champ.temp_passives.push_back([](const Stats &, const Stats &, Type time) {
+    Stats bonus{};
+    bonus[std::to_underlying(Stat::AD)] = 10.0;
+    return Champion::PassiveResult{bonus, time < 1.0};
+  });
+  Stats base{};
+  base[std::to_underlying(Stat::AD)] = 50.0;
+  // no time arg → time=0.0 → alive (0 < 1), bonus applied, stays
+  Stats r = champ.applyPassives(base, base);
+  REQUIRE(r[std::to_underlying(Stat::AD)] == Catch::Approx(60.0));
+  REQUIRE(champ.temp_passives.size() == 1);
+}
+
+TEST_CASE("passives can affect multiple stats at once", "[champion]") {
+  Champion champ;
+  champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
+  champ.mod_db.add(Stat::HP, ModType::Base, 1000.0, Source{"Base", ""});
+  champ.passives.push_back([](const Stats &base, const Stats &, Type) {
+    Stats bonus{};
+    // +5% of base HP as AD, +10% of base AD as HP
+    bonus[std::to_underlying(Stat::AD)] =
+        base[std::to_underlying(Stat::HP)] * 0.05;
+    bonus[std::to_underlying(Stat::HP)] =
+        base[std::to_underlying(Stat::AD)] * 0.10;
+    return Champion::PassiveResult{bonus, true};
+  });
+  Stats base = champ.getBaseStats();
+  Stats r = champ.applyPassives(base, base);
+  // AD: 50 + 1000*0.05 = 100; HP: 1000 + 50*0.10 = 1005
+  REQUIRE(r[std::to_underlying(Stat::AD)] == Catch::Approx(100.0));
+  REQUIRE(r[std::to_underlying(Stat::HP)] == Catch::Approx(1005.0));
+}
+
+TEST_CASE("evaluateChampion throws ConvergenceError for non-converging passive",
+          "[champion]") {
+  Champion champ;
+  champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
+  // weight 1.5 ≥ 1 → diverges
+  champ.passives.push_back([](const Stats &, const Stats &final, Type) {
+    Stats bonus{};
+    bonus[std::to_underlying(Stat::AD)] =
+        final[std::to_underlying(Stat::AD)] * 1.5;
+    return Champion::PassiveResult{bonus, true};
+  });
+  REQUIRE_THROWS_AS(champ.evaluateChampion(0.01, 5), moba::ConvergenceError);
+}
+
+TEST_CASE("evaluateChampion does not consume one-shot or temp passives",
+          "[champion]") {
+  Champion champ;
+  champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
+  champ.passives.push_back([](const Stats &, const Stats &, Type) {
+    Stats bonus{};
+    bonus[std::to_underlying(Stat::AD)] = 10.0;
+    return Champion::PassiveResult{bonus, true};
+  });
+  champ.one_shot_passives.push_back([](const Stats &, const Stats &, Type) {
+    Stats bonus{};
+    bonus[std::to_underlying(Stat::AD)] = 100.0;
+    return Champion::PassiveResult{bonus, false};
+  });
+  champ.temp_passives.push_back([](const Stats &, const Stats &, Type) {
+    Stats bonus{};
+    bonus[std::to_underlying(Stat::AD)] = 200.0;
+    return Champion::PassiveResult{bonus, true};
+  });
+
+  Stats result = champ.evaluateChampion();
+  // only permanent passive contributes: 50 + 10 = 60
+  REQUIRE(result[std::to_underlying(Stat::AD)] == Catch::Approx(60.0));
+  // one-shot and temp untouched
+  REQUIRE(champ.one_shot_passives.size() == 1);
+  REQUIRE(champ.temp_passives.size() == 1);
+}
+
+TEST_CASE("getDeltaStats is zero for two empty stats arrays", "[champion]") {
+  Stats a{};
+  Stats b{};
+  REQUIRE(Champion::getDeltaStats(a, b) == Catch::Approx(0.0));
+}
+
+TEST_CASE("full simulation: permanent + one-shot + temp across timesteps",
+          "[champion]") {
+  Champion champ;
+  champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
+  champ.passives.push_back([](const Stats &, const Stats &, Type) {
+    Stats bonus{};
+    bonus[std::to_underlying(Stat::AD)] = 5.0;
+    return Champion::PassiveResult{bonus, true};
+  });
+  // burn temp: lasts 2.0s from t=0
+  champ.temp_passives.push_back(
+      [start = 0.0, duration = 2.0](const Stats &, const Stats &, Type time) {
+        Stats bonus{};
+        bonus[std::to_underlying(Stat::AD)] = 10.0;
+        return Champion::PassiveResult{bonus, time - start < duration};
+      });
+  // burst one-shot: +20 once
+  champ.one_shot_passives.push_back([](const Stats &, const Stats &, Type) {
+    Stats bonus{};
+    bonus[std::to_underlying(Stat::AD)] = 20.0;
+    return Champion::PassiveResult{bonus, false};
+  });
+
+  Stats base = champ.getBaseStats();
+  // t=0: perm(5) + one-shot(20) + temp(10) = 50+35 = 85; one-shot consumed
+  Stats t0 = champ.applyPassives(base, base, 0.0);
+  REQUIRE(t0[std::to_underlying(Stat::AD)] == Catch::Approx(85.0));
+  REQUIRE(champ.one_shot_passives.empty());
+  REQUIRE(champ.temp_passives.size() == 1);
+
+  // t=1: perm(5) + temp(10) = 65; temp still alive
+  Stats t1 = champ.applyPassives(base, base, 1.0);
+  REQUIRE(t1[std::to_underlying(Stat::AD)] == Catch::Approx(65.0));
+  REQUIRE(champ.temp_passives.size() == 1);
+
+  // t=2: temp expires this step (bonus applied, then removed): perm(5)+temp(10)=65
+  Stats t2 = champ.applyPassives(base, base, 2.0);
+  REQUIRE(t2[std::to_underlying(Stat::AD)] == Catch::Approx(65.0));
+  REQUIRE(champ.temp_passives.empty());
+
+  // t=3: only perm: 50+5 = 55
+  Stats t3 = champ.applyPassives(base, base, 3.0);
+  REQUIRE(t3[std::to_underlying(Stat::AD)] == Catch::Approx(55.0));
+}

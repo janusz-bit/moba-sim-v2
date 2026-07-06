@@ -135,3 +135,63 @@ TEST_CASE("Scenario: non-converging passive throws ConvergenceError",
   // Weight 1.5 ≥ 1 → diverges, should throw after max_iter
   REQUIRE_THROWS_AS(champ.evaluateChampion(0.01, 5), moba::ConvergenceError);
 }
+
+TEST_CASE("Scenario: temp passive expires mid-simulation", "[scenario]") {
+  Champion champ;
+  champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
+  champ.passives.push_back([](const Stats &, const Stats &, Type) {
+    Stats bonus{};
+    bonus[std::to_underlying(Stat::AD)] = 5.0;
+    return Champion::PassiveResult{bonus, true};
+  });
+  // buff: +20 AD for 3 seconds starting at t=0
+  champ.temp_passives.push_back(
+      [start = 0.0, duration = 3.0](const Stats &, const Stats &, Type time) {
+        Stats bonus{};
+        bonus[std::to_underlying(Stat::AD)] = 20.0;
+        return Champion::PassiveResult{bonus, time - start < duration};
+      });
+
+  Stats base = champ.getBaseStats();
+  REQUIRE(base[std::to_underlying(Stat::AD)] == Catch::Approx(50.0));
+
+  // t=1: perm(5) + temp(20) = 75
+  Stats t1 = champ.applyPassives(base, base, 1.0);
+  REQUIRE(t1[std::to_underlying(Stat::AD)] == Catch::Approx(75.0));
+  REQUIRE(champ.temp_passives.size() == 1);
+
+  // t=3: temp expires this step (bonus applied, then removed): 50+5+20 = 75
+  Stats t3 = champ.applyPassives(base, base, 3.0);
+  REQUIRE(t3[std::to_underlying(Stat::AD)] == Catch::Approx(75.0));
+  REQUIRE(champ.temp_passives.empty());
+
+  // t=4: only perm: 55
+  Stats t4 = champ.applyPassives(base, base, 4.0);
+  REQUIRE(t4[std::to_underlying(Stat::AD)] == Catch::Approx(55.0));
+}
+
+TEST_CASE("Scenario: one-shot passive fires once then permanent remains",
+          "[scenario]") {
+  Champion champ;
+  champ.mod_db.add(Stat::HP, ModType::Base, 1000.0, Source{"Base", ""});
+  champ.passives.push_back([](const Stats &, const Stats &, Type) {
+    Stats bonus{};
+    bonus[std::to_underlying(Stat::HP)] = 100.0;
+    return Champion::PassiveResult{bonus, true};
+  });
+  champ.one_shot_passives.push_back([](const Stats &, const Stats &, Type) {
+    Stats bonus{};
+    bonus[std::to_underlying(Stat::HP)] = 500.0;
+    return Champion::PassiveResult{bonus, false};
+  });
+
+  Stats base = champ.getBaseStats();
+  // first step: 1000 + 100 (perm) + 500 (one-shot) = 1600
+  Stats first = champ.applyPassives(base, base, 0.0);
+  REQUIRE(first[std::to_underlying(Stat::HP)] == Catch::Approx(1600.0));
+  REQUIRE(champ.one_shot_passives.empty());
+
+  // second step: only perm: 1000 + 100 = 1100
+  Stats second = champ.applyPassives(base, base, 1.0);
+  REQUIRE(second[std::to_underlying(Stat::HP)] == Catch::Approx(1100.0));
+}
