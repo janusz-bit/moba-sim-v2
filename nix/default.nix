@@ -20,7 +20,14 @@
       pre-commit.settings.hooks = {
         nixfmt.enable = true;
         clang-format.enable = true;
-        clang-tidy.enable = true;
+        clang-tidy = {
+          enable = true;
+          excludes = [ "^tests/" ];
+          args = [
+            "--extra-arg=-std=c++23"
+            "--extra-arg=-Iinclude"
+          ];
+        };
       };
 
       devShells.default = pkgs.mkShell {
