@@ -12,15 +12,27 @@ namespace {
   return out;
 }
 
-// Applies only permanent passives; used by evaluateChampion for fixed-point
-// iteration. Does not touch one_shot_/temp_ passives.
+// Applies all passives (perm + one_shot + temp) in a single step without
+// removing anything. Records the `alive` flag of each temp passive at `idx`
+// so the caller can prune after convergence.
 [[nodiscard]] Champion::Stats
-applyPermanentPassives(const std::vector<Champion::Passive> &passives,
-                       const Champion::Stats &base, const Champion::Stats &final,
-                       Type time) {
+applyAllPassivesNoRemove(const std::vector<Champion::Passive> &passives,
+                         const std::vector<Champion::Passive> &one_shot,
+                         const std::vector<Champion::Passive> &temp,
+                         const Champion::Stats &base, const Champion::Stats &final,
+                         Type time, std::vector<bool> &temp_alive) {
   Champion::Stats out = base;
   for (const auto &passive : passives) {
     out = addStats(out, passive(base, final, time).bonus);
+  }
+  for (const auto &passive : one_shot) {
+    out = addStats(out, passive(base, final, time).bonus);
+  }
+  temp_alive.clear();
+  for (const auto &passive : temp) {
+    auto result = passive(base, final, time);
+    out = addStats(out, result.bonus);
+    temp_alive.push_back(result.alive);
   }
   return out;
 }
@@ -178,9 +190,11 @@ Champion::Stats Champion::evaluateChampion(Type eps, std::size_t max_iter) {
   Stats final = base;
   Stats prev = base;
   std::size_t iter = 0;
+  std::vector<bool> temp_alive;
   do {
     prev = final;
-    final = applyPermanentPassives(passives, base, prev, 0.0);
+    final = applyAllPassivesNoRemove(passives, one_shot_passives, temp_passives,
+                                     base, prev, 0.0, temp_alive);
     ++iter;
   } while (getDeltaStats(final, prev) > eps && iter < max_iter);
   if (iter >= max_iter && getDeltaStats(final, prev) > eps) {
@@ -188,6 +202,17 @@ Champion::Stats Champion::evaluateChampion(Type eps, std::size_t max_iter) {
         "evaluateChampion did not converge after " + std::to_string(max_iter) +
         " iterations (eps=" + std::to_string(eps) + ", delta=" +
         std::to_string(getDeltaStats(final, prev)) + ")");
+  }
+  // one-shot passives are always consumed after evaluation
+  one_shot_passives.clear();
+  // temp passives that reported alive=false on the final iteration are removed
+  for (auto it = temp_passives.begin(); it != temp_passives.end();) {
+    if (!temp_alive.empty() &&
+        !temp_alive[static_cast<std::size_t>(it - temp_passives.begin())]) {
+      it = temp_passives.erase(it);
+    } else {
+      ++it;
+    }
   }
   return final;
 }

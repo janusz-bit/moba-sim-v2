@@ -480,11 +480,30 @@ TEST_CASE("evaluateChampion does not consume one-shot or temp passives",
   });
 
   Stats result = champ.evaluateChampion();
-  // only permanent passive contributes: 50 + 10 = 60
-  REQUIRE(result[std::to_underlying(Stat::AD)] == Catch::Approx(60.0));
-  // one-shot and temp untouched
-  REQUIRE(champ.one_shot_passives.size() == 1);
+  // all passives contribute: 50 + 10 (perm) + 100 (one-shot) + 200 (temp) = 360
+  REQUIRE(result[std::to_underlying(Stat::AD)] == Catch::Approx(360.0));
+  // one-shot consumed after evaluation
+  REQUIRE(champ.one_shot_passives.empty());
+  // temp with alive=true stays
   REQUIRE(champ.temp_passives.size() == 1);
+}
+
+TEST_CASE("evaluateChampion removes temp passives returning alive=false",
+          "[champion]") {
+  Champion champ;
+  champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
+  // temp already expired (alive=false) — should be removed after evaluation
+  champ.temp_passives.push_back([](const Stats &, const Stats &, Type) {
+    Stats bonus{};
+    bonus[std::to_underlying(Stat::AD)] = 30.0;
+    return Champion::PassiveResult{bonus, false};
+  });
+
+  Stats result = champ.evaluateChampion();
+  // bonus applied during iteration: 50 + 30 = 80
+  REQUIRE(result[std::to_underlying(Stat::AD)] == Catch::Approx(80.0));
+  // temp removed because alive=false on final iteration
+  REQUIRE(champ.temp_passives.empty());
 }
 
 TEST_CASE("getDeltaStats is zero for two empty stats arrays", "[champion]") {

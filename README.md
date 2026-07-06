@@ -88,22 +88,27 @@ Applies all three queues in a single step:
 
 Returns `base + sum(bonuses)`. Mutates `one_shot_passives` and `temp_passives`.
 
-## `evaluateChampion(eps, max_iter)` — fixed-point of permanent passives
+## `evaluateChampion(eps, max_iter)` — fixed-point of all passives
 
-Iterates **only** permanent `passives` to resolve fixed-point interactions
-(e.g. `bonus = 0.1 * final` → converges to `final = base / 0.9`):
+Iterates **all three queues** (perm + one_shot + temp) to resolve fixed-point
+interactions, but **does not remove** passives during iteration — passives are
+applied repeatedly with `time = 0.0` (the fixed-point is immediate, not a
+simulation step). After convergence:
+
+- `one_shot_passives` are always cleared (consumed by the evaluation).
+- `temp_passives` returning `alive=false` on the final iteration are removed;
+  those with `alive=true` stay.
 
 ```
 final = base
 repeat:
   prev = final
-  final = base + sum(passive(base, prev, 0.0))
+  final = base + sum(passive(base, prev, 0.0))   // all queues, no removal
 until delta(final, prev) <= eps  or  iter >= max_iter
+then: clear one_shot; remove temp where alive=false
 ```
 
-Does **not** touch `one_shot_passives` or `temp_passives` — those are
-time-based concepts for simulation and do not participate in the immediate
-fixed-point. Throws `ConvergenceError` if not converged within `max_iter`.
+Throws `ConvergenceError` if not converged within `max_iter`.
 
 ## Usage
 
