@@ -64,7 +64,7 @@ void ModDB::remove(const std::function<bool(const Modifier &)> &predicate) {
   mods_.erase(it, end);
 }
 
-[[nodiscard]] Type ModDB::getSumStat(
+Type ModDB::getSumStat(
     const Stat &stat,
     const std::function<bool(const Modifier &)> &predicate) const {
   Type total = 0.0;
@@ -76,7 +76,7 @@ void ModDB::remove(const std::function<bool(const Modifier &)> &predicate) {
   return total;
 }
 
-[[nodiscard]] Type ModDB::getIncStat(
+Type ModDB::getIncStat(
     const Stat &stat,
     const std::function<bool(const Modifier &)> &predicate) const {
   Type total = 1.0;
@@ -88,7 +88,7 @@ void ModDB::remove(const std::function<bool(const Modifier &)> &predicate) {
   return total;
 }
 
-[[nodiscard]] Type ModDB::getMoreStat(
+Type ModDB::getMoreStat(
     const Stat &stat,
     const std::function<bool(const Modifier &)> &predicate) const {
   Type total = 1.0;
@@ -100,7 +100,7 @@ void ModDB::remove(const std::function<bool(const Modifier &)> &predicate) {
   return total;
 }
 
-[[nodiscard]] Type
+Type
 ModDB::getStat(const Stat &stat,
                const std::function<bool(const Modifier &)> &predicate) const {
   return getSumStat(stat, predicate) * getIncStat(stat, predicate) *
@@ -120,7 +120,7 @@ void ModDB::replace(const Stat &stat, const ModType &type, const Type &value,
   }
 }
 
-[[nodiscard]] Champion::Stats Champion::getBaseStats() const {
+Champion::Stats Champion::getBaseStats() const {
   Stats stats{};
   for (std::size_t i = 0; i < std::to_underlying(Stat::Count); ++i) {
     stats[i] = mod_db.getStat(static_cast<Stat>(i));
@@ -137,7 +137,7 @@ Champion::Stats Champion::applyPassives(const Stats &base,
   return addStats(base, bonus);
 }
 
-[[nodiscard]] Type Champion::getDeltaStats(const Stats &stats1,
+Type Champion::getDeltaStats(const Stats &stats1,
                                            const Stats &stats2) {
   Type delta = 0;
   for (std::size_t i = 0; i < std::to_underlying(Stat::Count); ++i) {
