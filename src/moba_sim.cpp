@@ -17,7 +17,7 @@ namespace {
 [[nodiscard]] Champion::Stats
 applyPassivesNoRemove(const std::vector<Champion::Passive> &passives,
                      const Champion::Stats &base, const Champion::Stats &final,
-                     Type time, std::vector<bool> &alive_flags) {
+                     const Type &time, std::vector<bool> &alive_flags) {
   Champion::Stats out = base;
   alive_flags.clear();
   for (const auto &passive : passives) {
@@ -145,7 +145,7 @@ Champion::Stats Champion::getBaseStats() const {
 }
 
 Champion::Stats Champion::applyPassives(const Stats &base,
-                                         const Stats &final, Type time) {
+                                         const Stats &final, const Type &time) {
   Stats bonus{};
   for (auto it = passives.begin(); it != passives.end();) {
     auto result = (*it)(base, final, time);

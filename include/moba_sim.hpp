@@ -100,7 +100,7 @@ struct Champion {
     bool alive = true;
   };
   using Passive = std::function<PassiveResult(const Stats &base,
-                                              const Stats &final, Type time)>;
+                                              const Stats &final, const Type &time)>;
   using Passives = std::vector<Passive>;
   ModDB mod_db;
   Passives passives;
@@ -109,7 +109,7 @@ struct Champion {
 
   // Applies all passives in a single step. Passives returning alive=false are
   // removed after their bonus is applied. Not const: mutates passives.
-  Stats applyPassives(const Stats &base, const Stats &final, Type time = 0.0);
+  Stats applyPassives(const Stats &base, const Stats &final, const Type &time = 0.0);
 
   [[nodiscard]] static Type getDeltaStats(const Stats &stats1,
                                            const Stats &stats2);
