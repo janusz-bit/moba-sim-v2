@@ -4,10 +4,23 @@
 namespace moba {
 
 namespace {
-Champion::Stats addStats(const Champion::Stats &a, const Champion::Stats &b) {
+[[nodiscard]] Champion::Stats addStats(const Champion::Stats &a, const Champion::Stats &b) {
   Champion::Stats out{};
   for (std::size_t i = 0; i < std::to_underlying(Stat::Count); ++i) {
     out[i] = a[i] + b[i];
+  }
+  return out;
+}
+
+// Applies only permanent passives; used by evaluateChampion for fixed-point
+// iteration. Does not touch one_shot_/temp_ passives.
+[[nodiscard]] Champion::Stats
+applyPermanentPassives(const std::vector<Champion::Passive> &passives,
+                       const Champion::Stats &base, const Champion::Stats &final,
+                       Type time) {
+  Champion::Stats out = base;
+  for (const auto &passive : passives) {
+    out = addStats(out, passive(base, final, time).bonus);
   }
   return out;
 }
@@ -129,16 +142,29 @@ Champion::Stats Champion::getBaseStats() const {
 }
 
 Champion::Stats Champion::applyPassives(const Stats &base,
-                                        const Stats &final) const {
+                                         const Stats &final, Type time) {
   Stats bonus{};
   for (const auto &passive : passives) {
-    bonus = addStats(bonus, passive(base, final));
+    bonus = addStats(bonus, passive(base, final, time).bonus);
+  }
+  for (auto it = one_shot_passives.begin(); it != one_shot_passives.end();) {
+    bonus = addStats(bonus, (*it)(base, final, time).bonus);
+    it = one_shot_passives.erase(it);
+  }
+  for (auto it = temp_passives.begin(); it != temp_passives.end();) {
+    auto result = (*it)(base, final, time);
+    bonus = addStats(bonus, result.bonus);
+    if (result.alive) {
+      ++it;
+    } else {
+      it = temp_passives.erase(it);
+    }
   }
   return addStats(base, bonus);
 }
 
 Type Champion::getDeltaStats(const Stats &stats1,
-                                           const Stats &stats2) {
+                                            const Stats &stats2) {
   Type delta = 0;
   for (std::size_t i = 0; i < std::to_underlying(Stat::Count); ++i) {
     Type delta_now = std::abs(stats2[i] - stats1[i]);
@@ -147,14 +173,14 @@ Type Champion::getDeltaStats(const Stats &stats1,
   return delta;
 }
 
-Champion::Stats Champion::evaluateChampion(Type eps, std::size_t max_iter) const {
+Champion::Stats Champion::evaluateChampion(Type eps, std::size_t max_iter) {
   const Stats base = getBaseStats();
   Stats final = base;
   Stats prev = base;
   std::size_t iter = 0;
   do {
     prev = final;
-    final = applyPassives(base, prev);
+    final = applyPermanentPassives(passives, base, prev, 0.0);
     ++iter;
   } while (getDeltaStats(final, prev) > eps && iter < max_iter);
   if (iter >= max_iter && getDeltaStats(final, prev) > eps) {

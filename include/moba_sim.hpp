@@ -87,24 +87,34 @@ public:
 
 struct Champion {
   using Stats = std::array<Type, std::to_underlying(Stat::Count)>;
-  // Passive returns a *bonus* (delta): only stats it adds, others = 0.
-  // Computed from (base, final); passives are independent within one
-  // applyPassives call (order does not matter).
-  using Passive = std::function<Stats(const Stats &base, const Stats &final)>;
+  struct PassiveResult {
+    Stats bonus{};
+    bool alive = true;
+  };
+  using Passive = std::function<PassiveResult(const Stats &base,
+                                              const Stats &final, Type time)>;
   using Passives = std::vector<Passive>;
+  // One-shot: removed after a single application.
+  using OneShotPassives = std::vector<Passive>;
+  // Temp: self-managed lifetime via time; removed when returning alive=false.
+  using TempPassives = std::vector<Passive>;
   ModDB mod_db;
   Passives passives;
+  OneShotPassives one_shot_passives;
+  TempPassives temp_passives;
 
   [[nodiscard]] Stats getBaseStats() const;
 
-  [[nodiscard]] Stats applyPassives(const Stats &base,
-                                    const Stats &final) const;
+  // Applies permanent, one-shot (then consumed), and temp (self-managed via
+  // time) passives in a single step. Passives returning alive=false are
+  // removed. Not const: mutates one_shot_/temp_ passives.
+  Stats applyPassives(const Stats &base, const Stats &final, Type time = 0.0);
 
   [[nodiscard]] static Type getDeltaStats(const Stats &stats1,
-                                           const Stats &stats2);
+                                          const Stats &stats2);
 
   [[nodiscard]] Stats evaluateChampion(Type eps = 0.01,
-                                       std::size_t max_iter = 1000) const;
+                                       std::size_t max_iter = 1000);
 };
 
 } // namespace moba
