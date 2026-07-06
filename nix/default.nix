@@ -31,6 +31,7 @@
         packages =
           config.pre-commit.settings.enabledPackages
           ++ (with pkgs; [
+            pre-commit
             # add packages to use in shell
             cmake
             ninja
