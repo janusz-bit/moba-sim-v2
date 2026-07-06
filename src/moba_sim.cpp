@@ -15,13 +15,13 @@ namespace {
 // Applies all passives in a single step without removing any. Records the
 // `alive` flag of each passive so the caller can prune after convergence.
 [[nodiscard]] Champion::Stats
-applyPassivesNoRemove(const std::vector<Champion::Passive> &passives,
+applyPassivesNoRemove(const std::vector<Champion::PassiveEntry> &passives,
                      const Champion::Stats &base, const Champion::Stats &final,
                      const Type &time, std::vector<bool> &alive_flags) {
   Champion::Stats out = base;
   alive_flags.clear();
-  for (const auto &passive : passives) {
-    auto result = passive(base, final, time);
+  for (const auto &entry : passives) {
+    auto result = entry.passive(base, final, time);
     out = addStats(out, result.bonus);
     alive_flags.push_back(result.alive);
   }
@@ -144,11 +144,21 @@ Champion::Stats Champion::getBaseStats() const {
   return stats;
 }
 
+void Champion::addPassive(PassiveEntry entry) {
+  for (auto &e : passives) {
+    if (e.id == entry.id) {
+      e.passive = std::move(entry.passive);
+      return;
+    }
+  }
+  passives.push_back(std::move(entry));
+}
+
 Champion::Stats Champion::applyPassives(const Stats &base,
                                          const Stats &final, const Type &time) {
   Stats bonus{};
   for (auto it = passives.begin(); it != passives.end();) {
-    auto result = (*it)(base, final, time);
+    auto result = it->passive(base, final, time);
     bonus = addStats(bonus, result.bonus);
     if (result.alive) {
       ++it;

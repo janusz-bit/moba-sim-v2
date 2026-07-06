@@ -71,11 +71,24 @@ A passive **is the sole authority on its lifetime** via the `alive` flag:
 - **temp**: returns `alive=false` once it decides to expire (e.g. by capturing
   a start time and checking `time - start < duration`)
 
-All passives live in a single `passives` queue. The framework treats them
-uniformly: call, sum the bonus, remove if `alive=false`. A passive may capture
-a `start_time` and `duration`, reset itself, or change its effect — the
-framework knows nothing about time/counters/handles; the passive is a black
-box with access to `time`.
+All passives live in a single `passives` queue of `PassiveEntry` (id + passive).
+Use `Champion::PassiveFactory::make()` to create entries with unique ids, and
+`Champion::addPassive()` to insert — inserting an entry whose id already exists
+**replaces** the existing passive (refresh), otherwise a new entry is appended.
+The framework treats passives uniformly: call, sum the bonus, remove if
+`alive=false`. A passive may capture a `start_time` and `duration`, reset
+itself, or change its effect — the framework knows nothing about
+time/counters/handles; the passive is a black box with access to `time`.
+
+## `addPassive(entry)` — insert or refresh
+
+```cpp
+Champion::PassiveFactory factory;
+auto e = factory.make(myPassive);
+champ.addPassive(e);          // insert (new id)
+// later, refresh with a new passive but the same id:
+champ.addPassive({e.id, newPassive});  // replace existing
+```
 
 ## `applyPassives(base, final, time)` — one simulation step
 
@@ -113,11 +126,12 @@ Throws `ConvergenceError` if not converged within `max_iter`.
 ```cpp
 Champion c;
 c.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
-c.passives.push_back([](const Stats &base, const Stats &final, Type) {
+Champion::PassiveFactory factory;
+c.addPassive(factory.make([](const Stats &base, const Stats &final, const Type &) {
   Stats bonus{};
   bonus[std::to_underlying(Stat::AD)] = 10.0;
   return Champion::PassiveResult{bonus, true};  // permanent
-});
+}));
 Stats final = c.evaluateChampion();  // fixed-point of all passives
 ```
 
@@ -133,22 +147,29 @@ for (double t = 0.0; t < 10.0; t += dt) {
 **Temp passive** (e.g. a burn lasting 3 seconds):
 
 ```cpp
-c.passives.push_back(
-    [start = 2.0, duration = 3.0](const Stats &, const Stats &, Type time) {
+c.addPassive(factory.make(
+    [start = 2.0, duration = 3.0](const Stats &, const Stats &, const Type &time) {
       Stats bonus{};
       bonus[std::to_underlying(Stat::AD)] = 10.0;
       return Champion::PassiveResult{bonus, time - start < duration};  // alive until t=5.0
-    });
+    }));
 ```
 
 **One-shot passive** (e.g. a burst that fires once):
 
 ```cpp
-c.passives.push_back([](const Stats &, const Stats &, Type) {
+c.addPassive(factory.make([](const Stats &, const Stats &, const Type &) {
   Stats bonus{};
   bonus[std::to_underlying(Stat::AD)] = 20.0;
   return Champion::PassiveResult{bonus, false};  // alive=false → removed after applying
-});
+}));
 ```
 
-To refresh a temp effect, re-insert a new passive with an updated `start`.
+To refresh a temp effect, call `addPassive` again with the same id but a new
+passive (e.g. with an updated `start`):
+
+```cpp
+auto burn = factory.make(make_burn(0.0, 3.0));
+c.addPassive(burn);                       // insert
+c.addPassive({burn.id, make_burn(5.0, 5.0)});  // refresh: same id, new passive
+```
