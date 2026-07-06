@@ -30,7 +30,8 @@ TEST_CASE("ModDB remove by stat/type/source erases first match", "[mod_db]") {
   REQUIRE(db.get_mods()[0].stat == Stat::HP);
 }
 
-TEST_CASE("ModDB remove by stat/type/source is no-op when not found", "[mod_db]") {
+TEST_CASE("ModDB remove by stat/type/source is no-op when not found",
+          "[mod_db]") {
   ModDB db;
   Source src{"Item", "desc"};
   db.add(Stat::AD, ModType::Base, 10.0, src);
@@ -67,7 +68,8 @@ TEST_CASE("ModDB replace updates value when present", "[mod_db]") {
   REQUIRE(db.get_mods()[0].value == 25.0);
 }
 
-TEST_CASE("ModDB getSumStat sums Base modifiers for matching stat", "[mod_db]") {
+TEST_CASE("ModDB getSumStat sums Base modifiers for matching stat",
+          "[mod_db]") {
   ModDB db;
   Source src{"Item", ""};
   db.add(Stat::AD, ModType::Base, 10.0, src);
@@ -120,15 +122,16 @@ TEST_CASE("ModDB getters respect predicate filtering by source", "[mod_db]") {
   Source buff{"Buff", ""};
   db.add(Stat::AD, ModType::Base, 10.0, item);
   db.add(Stat::AD, ModType::Base, 20.0, buff);
-  REQUIRE(db.getSumStat(Stat::AD,
-                        [](const Modifier &m) { return m.source.name == "Item"; }) ==
-          Catch::Approx(10.0));
-  REQUIRE(db.getSumStat(Stat::AD,
-                        [](const Modifier &m) { return m.source.name == "Buff"; }) ==
-          Catch::Approx(20.0));
+  REQUIRE(db.getSumStat(Stat::AD, [](const Modifier &m) {
+    return m.source.name == "Item";
+  }) == Catch::Approx(10.0));
+  REQUIRE(db.getSumStat(Stat::AD, [](const Modifier &m) {
+    return m.source.name == "Buff";
+  }) == Catch::Approx(20.0));
 }
 
-TEST_CASE("ModDB multiple modifiers of same stat and type aggregate", "[mod_db]") {
+TEST_CASE("ModDB multiple modifiers of same stat and type aggregate",
+          "[mod_db]") {
   ModDB db;
   Source src{"Item", ""};
   db.add(Stat::HP, ModType::Base, 100.0, src);
@@ -246,8 +249,9 @@ TEST_CASE("ModDB remove only erases first matching modifier", "[mod_db]") {
   REQUIRE(db.getSumStat(Stat::AD) == Catch::Approx(50.0));
 }
 
-TEST_CASE("ModDB remove by predicate removes nothing when predicate false for all",
-          "[mod_db]") {
+TEST_CASE(
+    "ModDB remove by predicate removes nothing when predicate false for all",
+    "[mod_db]") {
   ModDB db;
   Source src{"Item", ""};
   db.add(Stat::AD, ModType::Base, 10.0, src);
@@ -256,8 +260,9 @@ TEST_CASE("ModDB remove by predicate removes nothing when predicate false for al
   REQUIRE(db.get_mods().size() == 2);
 }
 
-TEST_CASE("ModDB remove by predicate removes everything with always-true predicate",
-          "[mod_db]") {
+TEST_CASE(
+    "ModDB remove by predicate removes everything with always-true predicate",
+    "[mod_db]") {
   ModDB db;
   Source src{"Item", ""};
   db.add(Stat::AD, ModType::Base, 10.0, src);
@@ -278,7 +283,8 @@ TEST_CASE("ModDB replace preserves other modifiers", "[mod_db]") {
   REQUIRE(db.getStat(Stat::HP) == Catch::Approx(100.0));
 }
 
-TEST_CASE("ModDB replace with different source inserts new, keeps old", "[mod_db]") {
+TEST_CASE("ModDB replace with different source inserts new, keeps old",
+          "[mod_db]") {
   ModDB db;
   Source item{"Item", ""};
   Source buff{"Buff", ""};
@@ -296,10 +302,11 @@ TEST_CASE("ModDB getSumStat predicate filters by type", "[mod_db]") {
   db.add(Stat::AD, ModType::Base, 10.0, item);
   db.add(Stat::AD, ModType::Base, 20.0, buff);
   db.add(Stat::AD, ModType::Inc, 0.5, item);
-  // predicate matches only item; but getSumStat only sums Base, so Inc is excluded anyway
-  REQUIRE(db.getSumStat(Stat::AD,
-                       [](const Modifier &m) { return m.source.name == "Item"; }) ==
-          Catch::Approx(10.0));
+  // predicate matches only item; but getSumStat only sums Base, so Inc is
+  // excluded anyway
+  REQUIRE(db.getSumStat(Stat::AD, [](const Modifier &m) {
+    return m.source.name == "Item";
+  }) == Catch::Approx(10.0));
 }
 
 TEST_CASE("ModDB full pipeline with mixed stats and sources", "[mod_db]") {

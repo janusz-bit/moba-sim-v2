@@ -25,13 +25,12 @@
 
       devShells.default = pkgs.mkShell {
         shellHook = ''
-          ${config.pre-commit.installationScript}
+          ${config.pre-commit.shellHook}
         '';
 
         packages =
           config.pre-commit.settings.enabledPackages
           ++ (with pkgs; [
-            pre-commit
             # add packages to use in shell
             cmake
             ninja
