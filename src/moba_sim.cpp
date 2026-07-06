@@ -4,7 +4,8 @@
 namespace moba {
 
 namespace {
-[[nodiscard]] Champion::Stats addStats(const Champion::Stats &a, const Champion::Stats &b) {
+[[nodiscard]] Champion::Stats addStats(const Champion::Stats &a,
+                                       const Champion::Stats &b) {
   Champion::Stats out{};
   for (std::size_t i = 0; i < std::to_underlying(Stat::Count); ++i) {
     out[i] = a[i] + b[i];
@@ -12,20 +13,20 @@ namespace {
   return out;
 }
 
-// Applies all passives in a single step without removing any. Records the
-// `alive` flag of each passive so the caller can prune after convergence.
-[[nodiscard]] Champion::Stats
+// Applies all passives in a single step without removing any. Returns the
+// resulting stats and the `alive` flag of each passive (aligned with passives).
+[[nodiscard]] std::pair<Champion::Stats, std::vector<bool>>
 applyPassivesNoRemove(const std::vector<Champion::PassiveEntry> &passives,
-                     const Champion::Stats &base, const Champion::Stats &final,
-                     const Type &time, std::vector<bool> &alive_flags) {
+                      const Champion::Stats &base, const Champion::Stats &final,
+                      const Type &time) {
   Champion::Stats out = base;
-  alive_flags.clear();
+  std::vector<bool> alive_flags;
   for (const auto &entry : passives) {
-    auto result = entry.passive(base, final, time);
-    out = addStats(out, result.bonus);
-    alive_flags.push_back(result.alive);
+    auto [bonus, alive] = entry.passive(base, final, time);
+    out = addStats(out, bonus);
+    alive_flags.push_back(alive);
   }
-  return out;
+  return {out, std::move(alive_flags)};
 }
 } // namespace
 
@@ -116,9 +117,9 @@ Type ModDB::getMoreStat(
   return total;
 }
 
-Type
-ModDB::getStat(const Stat &stat,
-               const std::function<bool(const Modifier &)> &predicate) const {
+Type ModDB::getStat(
+    const Stat &stat,
+    const std::function<bool(const Modifier &)> &predicate) const {
   return getSumStat(stat, predicate) * getIncStat(stat, predicate) *
          getMoreStat(stat, predicate);
 }
@@ -154,13 +155,13 @@ void Champion::addPassive(PassiveEntry entry) {
   passives.push_back(std::move(entry));
 }
 
-Champion::Stats Champion::applyPassives(const Stats &base,
-                                         const Stats &final, const Type &time) {
+Champion::Stats Champion::applyPassives(const Stats &base, const Stats &final,
+                                        const Type &time) {
   Stats bonus{};
   for (auto it = passives.begin(); it != passives.end();) {
-    auto result = it->passive(base, final, time);
-    bonus = addStats(bonus, result.bonus);
-    if (result.alive) {
+    auto [b, alive] = it->passive(base, final, time);
+    bonus = addStats(bonus, b);
+    if (alive) {
       ++it;
     } else {
       it = passives.erase(it);
@@ -169,8 +170,7 @@ Champion::Stats Champion::applyPassives(const Stats &base,
   return addStats(base, bonus);
 }
 
-Type Champion::getDeltaStats(const Stats &stats1,
-                                             const Stats &stats2) {
+Type Champion::getDeltaStats(const Stats &stats1, const Stats &stats2) {
   Type delta = 0;
   for (std::size_t i = 0; i < std::to_underlying(Stat::Count); ++i) {
     Type delta_now = std::abs(stats2[i] - stats1[i]);
@@ -187,14 +187,16 @@ Champion::Stats Champion::evaluateChampion(Type eps, std::size_t max_iter) {
   std::vector<bool> alive_flags;
   do {
     prev = final;
-    final = applyPassivesNoRemove(passives, base, prev, 0.0, alive_flags);
+    auto [f, flags] = applyPassivesNoRemove(passives, base, prev, 0.0);
+    final = f;
+    alive_flags = std::move(flags);
     ++iter;
   } while (getDeltaStats(final, prev) > eps && iter < max_iter);
   if (iter >= max_iter && getDeltaStats(final, prev) > eps) {
     throw ConvergenceError(
         "evaluateChampion did not converge after " + std::to_string(max_iter) +
-        " iterations (eps=" + std::to_string(eps) + ", delta=" +
-        std::to_string(getDeltaStats(final, prev)) + ")");
+        " iterations (eps=" + std::to_string(eps) +
+        ", delta=" + std::to_string(getDeltaStats(final, prev)) + ")");
   }
   // remove passives that reported alive=false on the final iteration
   for (std::size_t i = 0; i < passives.size() && i < alive_flags.size();) {

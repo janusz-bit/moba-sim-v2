@@ -39,7 +39,8 @@ TEST_CASE("Scenario: final-dependent passive converges to fixed point",
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
   champ.addPassive(factory().make([](const Stats &, const Stats &final, Type) {
     Stats bonus{};
-    bonus[std::to_underlying(Stat::AD)] = final[std::to_underlying(Stat::AD)] * 0.1;
+    bonus[std::to_underlying(Stat::AD)] =
+        final[std::to_underlying(Stat::AD)] * 0.1;
     return Champion::PassiveResult{bonus, true};
   }));
   // Fixed point: final = 50 + 0.1*final → final = 50/0.9 ≈ 55.5556
@@ -47,7 +48,8 @@ TEST_CASE("Scenario: final-dependent passive converges to fixed point",
   REQUIRE(result[std::to_underlying(Stat::AD)] ==
           Catch::Approx(55.5556).epsilon(0.001));
   // Verify it's not just base
-  REQUIRE(result[std::to_underlying(Stat::AD)] != Catch::Approx(50.0).epsilon(0.001));
+  REQUIRE(result[std::to_underlying(Stat::AD)] !=
+          Catch::Approx(50.0).epsilon(0.001));
 }
 
 TEST_CASE("Scenario: cancelling passives return base", "[scenario]") {
@@ -55,12 +57,14 @@ TEST_CASE("Scenario: cancelling passives return base", "[scenario]") {
   champ.mod_db.add(Stat::AP, ModType::Base, 300.0, Source{"Base", ""});
   champ.addPassive(factory().make([](const Stats &, const Stats &final, Type) {
     Stats bonus{};
-    bonus[std::to_underlying(Stat::AP)] = final[std::to_underlying(Stat::AP)] * 0.1;
+    bonus[std::to_underlying(Stat::AP)] =
+        final[std::to_underlying(Stat::AP)] * 0.1;
     return Champion::PassiveResult{bonus, true};
   }));
   champ.addPassive(factory().make([](const Stats &, const Stats &final, Type) {
     Stats bonus{};
-    bonus[std::to_underlying(Stat::AP)] = final[std::to_underlying(Stat::AP)] * -0.1;
+    bonus[std::to_underlying(Stat::AP)] =
+        final[std::to_underlying(Stat::AP)] * -0.1;
     return Champion::PassiveResult{bonus, true};
   }));
   // +0.1*final and -0.1*final cancel → bonus = 0 → result = base = 300
@@ -73,12 +77,14 @@ TEST_CASE("Scenario: uneven weights reach non-base fixed point", "[scenario]") {
   champ.mod_db.add(Stat::AP, ModType::Base, 300.0, Source{"Base", ""});
   champ.addPassive(factory().make([](const Stats &, const Stats &final, Type) {
     Stats bonus{};
-    bonus[std::to_underlying(Stat::AP)] = final[std::to_underlying(Stat::AP)] * 0.2;
+    bonus[std::to_underlying(Stat::AP)] =
+        final[std::to_underlying(Stat::AP)] * 0.2;
     return Champion::PassiveResult{bonus, true};
   }));
   champ.addPassive(factory().make([](const Stats &, const Stats &final, Type) {
     Stats bonus{};
-    bonus[std::to_underlying(Stat::AP)] = final[std::to_underlying(Stat::AP)] * -0.1;
+    bonus[std::to_underlying(Stat::AP)] =
+        final[std::to_underlying(Stat::AP)] * -0.1;
     return Champion::PassiveResult{bonus, true};
   }));
   // Net weight +0.1: final = 300 + 0.1*final → final = 300/0.9 ≈ 333.3333
@@ -86,7 +92,8 @@ TEST_CASE("Scenario: uneven weights reach non-base fixed point", "[scenario]") {
   REQUIRE(result[std::to_underlying(Stat::AP)] ==
           Catch::Approx(333.3333).epsilon(0.001));
   // Verify it's not base
-  REQUIRE(result[std::to_underlying(Stat::AP)] != Catch::Approx(300.0).epsilon(0.001));
+  REQUIRE(result[std::to_underlying(Stat::AP)] !=
+          Catch::Approx(300.0).epsilon(0.001));
 }
 
 TEST_CASE("Scenario: cross-stat dependency bonus from one stat to another",
@@ -103,9 +110,9 @@ TEST_CASE("Scenario: cross-stat dependency bonus from one stat to another",
   }));
   // HP unchanged (passive doesn't touch HP) → final[HP] = 1000
   // AD gets +0.01*1000 = 10 each iteration, but base AD = 50
-  // Iter 1: final = base + bonus = {HP:1000, AD:50} + {AD:10} = {HP:1000, AD:60}
-  // Iter 2: final = base + bonus(final) = {HP:1000, AD:50} + {AD:0.01*1000=10} = {HP:1000, AD:60}
-  // delta = 0 → converges, final[AD] = 60
+  // Iter 1: final = base + bonus = {HP:1000, AD:50} + {AD:10} = {HP:1000,
+  // AD:60} Iter 2: final = base + bonus(final) = {HP:1000, AD:50} +
+  // {AD:0.01*1000=10} = {HP:1000, AD:60} delta = 0 → converges, final[AD] = 60
   Stats result = champ.evaluateChampion(0.0001);
   REQUIRE(result[std::to_underlying(Stat::HP)] == Catch::Approx(1000.0));
   REQUIRE(result[std::to_underlying(Stat::AD)] == Catch::Approx(60.0));
@@ -120,14 +127,16 @@ TEST_CASE("Scenario: full pipeline ModDB + passives", "[scenario]") {
   // getBaseStats[AD] = 80 * (1+0.2) * 1.5 = 80 * 1.2 * 1.5 = 144
   champ.addPassive(factory().make([](const Stats &, const Stats &final, Type) {
     Stats bonus{};
-    bonus[std::to_underlying(Stat::AD)] = final[std::to_underlying(Stat::AD)] * 0.1;
+    bonus[std::to_underlying(Stat::AD)] =
+        final[std::to_underlying(Stat::AD)] * 0.1;
     return Champion::PassiveResult{bonus, true};
   }));
   // Fixed point: final = 144 + 0.1*final → final = 144/0.9 = 160
   Stats base = champ.getBaseStats();
   REQUIRE(base[std::to_underlying(Stat::AD)] == Catch::Approx(144.0));
   Stats result = champ.evaluateChampion(0.0001);
-  REQUIRE(result[std::to_underlying(Stat::AD)] == Catch::Approx(160.0).epsilon(0.001));
+  REQUIRE(result[std::to_underlying(Stat::AD)] ==
+          Catch::Approx(160.0).epsilon(0.001));
 }
 
 TEST_CASE("Scenario: non-converging passive throws ConvergenceError",
@@ -136,7 +145,8 @@ TEST_CASE("Scenario: non-converging passive throws ConvergenceError",
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
   champ.addPassive(factory().make([](const Stats &, const Stats &final, Type) {
     Stats bonus{};
-    bonus[std::to_underlying(Stat::AD)] = final[std::to_underlying(Stat::AD)] * 1.5;
+    bonus[std::to_underlying(Stat::AD)] =
+        final[std::to_underlying(Stat::AD)] * 1.5;
     return Champion::PassiveResult{bonus, true};
   }));
   // Weight 1.5 ≥ 1 → diverges, should throw after max_iter
@@ -225,15 +235,18 @@ TEST_CASE("Scenario: evaluateChampion includes one-shot in fixed-point",
         final[std::to_underlying(Stat::AD)] * 0.1;
     return Champion::PassiveResult{bonus, true};
   }));
-  // fixed-point includes one-shot: final = 50 + 100 + 0.1*final → 150/0.9 ≈ 166.67
+  // fixed-point includes one-shot: final = 50 + 100 + 0.1*final → 150/0.9 ≈
+  // 166.67
   Stats r = champ.evaluateChampion(0.0001);
-  REQUIRE(r[std::to_underlying(Stat::AD)] == Catch::Approx(166.6667).epsilon(0.001));
+  REQUIRE(r[std::to_underlying(Stat::AD)] ==
+          Catch::Approx(166.6667).epsilon(0.001));
   // one-shot consumed; permanent stays → 1 passive
   REQUIRE(champ.passives.size() == 1);
 }
 
-TEST_CASE("Scenario: evaluateChampion with temp that returns alive=false is removed",
-          "[scenario]") {
+TEST_CASE(
+    "Scenario: evaluateChampion with temp that returns alive=false is removed",
+    "[scenario]") {
   Champion champ;
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
   // temp: already expired (alive=false) but gives +30 once
@@ -283,8 +296,10 @@ TEST_CASE("Scenario: complex pipeline with mod_db + perm + one-shot + temp",
   // HP: 1000 + 200 (one-shot) = 1200
   REQUIRE(r[std::to_underlying(Stat::HP)] == Catch::Approx(1200.0));
   // AD: 144 (base) + 50 (temp) + 0.05*1200 = 144 + 50 + 60 = 254
-  REQUIRE(r[std::to_underlying(Stat::AD)] == Catch::Approx(254.0).epsilon(0.01));
-  // one-shot consumed (alive=false); perm and temp stay (alive=true) → 2 passives
+  REQUIRE(r[std::to_underlying(Stat::AD)] ==
+          Catch::Approx(254.0).epsilon(0.01));
+  // one-shot consumed (alive=false); perm and temp stay (alive=true) → 2
+  // passives
   REQUIRE(champ.passives.size() == 2);
 }
 
@@ -305,7 +320,8 @@ TEST_CASE("Scenario: simulation step does not affect evaluateChampion passives",
       }));
 
   Stats base = champ.getBaseStats();
-  // simulation step at t=1: perm + temp = 50 + 10 + 20 = 80; both stay (alive=true)
+  // simulation step at t=1: perm + temp = 50 + 10 + 20 = 80; both stay
+  // (alive=true)
   Stats sim = champ.applyPassives(base, base, 1.0);
   REQUIRE(sim[std::to_underlying(Stat::AD)] == Catch::Approx(80.0));
   REQUIRE(champ.passives.size() == 2);
@@ -338,7 +354,8 @@ TEST_CASE("Scenario: two one-shot passives fire in single evaluateChampion",
   REQUIRE(champ.passives.empty());
 }
 
-TEST_CASE("Scenario: large negative passive brings stat below zero", "[scenario]") {
+TEST_CASE("Scenario: large negative passive brings stat below zero",
+          "[scenario]") {
   Champion champ;
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
   champ.addPassive(factory().make([](const Stats &, const Stats &, Type) {
@@ -380,7 +397,8 @@ TEST_CASE("Scenario: passive chain AD→AP→HP converges", "[scenario]") {
   // Should converge — just verify no exception and stable
   REQUIRE_NOTHROW(champ.evaluateChampion(0.0001, 10000));
   Stats r = champ.evaluateChampion(0.0001, 10000);
-  // HP should be > 1000 (gains from AD), AD > 50 (gains from AP), AP > 50 (gains from HP)
+  // HP should be > 1000 (gains from AD), AD > 50 (gains from AP), AP > 50
+  // (gains from HP)
   REQUIRE(r[std::to_underlying(Stat::HP)] > 1000.0);
   REQUIRE(r[std::to_underlying(Stat::AD)] > 50.0);
   REQUIRE(r[std::to_underlying(Stat::AP)] > 50.0);
@@ -418,7 +436,8 @@ TEST_CASE("Scenario: temp passive re-inserted after expiry in simulation",
   REQUIRE(champ.passives.empty());
 }
 
-TEST_CASE("Scenario: evaluateChampion with all passive types and cross-stat dependencies",
+TEST_CASE("Scenario: evaluateChampion with all passive types and cross-stat "
+          "dependencies",
           "[scenario]") {
   Champion champ;
   Source src{"Item", ""};
@@ -455,7 +474,8 @@ TEST_CASE("Scenario: evaluateChampion with all passive types and cross-stat depe
   // AP: 100 + 40 (temp) = 140
   REQUIRE(r[std::to_underlying(Stat::AP)] == Catch::Approx(140.0));
   // AD: 144 (base) + 0.02*1800 = 144 + 36 = 180
-  REQUIRE(r[std::to_underlying(Stat::AD)] == Catch::Approx(180.0).epsilon(0.01));
+  REQUIRE(r[std::to_underlying(Stat::AD)] ==
+          Catch::Approx(180.0).epsilon(0.01));
   // one-shot consumed; perm and temp stay → 2 passives
   REQUIRE(champ.passives.size() == 2);
 }
