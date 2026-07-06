@@ -87,6 +87,14 @@ public:
 
 struct Champion {
   using Stats = std::array<Type, std::to_underlying(Stat::Count)>;
+  // A Passive receives (base, final, time) and returns a bonus (delta) plus an
+  // `alive` flag. `time` is the absolute simulation time (starts at 0, only
+  // increases). The passive is the sole authority on its lifetime:
+  //   - permanent: always returns `alive=true`
+  //   - one-shot: returns `alive=false` after its single application
+  //   - temp: returns `alive=false` once it decides to expire (e.g. by
+  //     capturing a start time and checking `time - start < duration`)
+  // Passives returning `alive=false` are removed after their bonus is applied.
   struct PassiveResult {
     Stats bonus{};
     bool alive = true;
@@ -94,27 +102,20 @@ struct Champion {
   using Passive = std::function<PassiveResult(const Stats &base,
                                               const Stats &final, Type time)>;
   using Passives = std::vector<Passive>;
-  // One-shot: removed after a single application.
-  using OneShotPassives = std::vector<Passive>;
-  // Temp: self-managed lifetime via time; removed when returning alive=false.
-  using TempPassives = std::vector<Passive>;
   ModDB mod_db;
   Passives passives;
-  OneShotPassives one_shot_passives;
-  TempPassives temp_passives;
 
   [[nodiscard]] Stats getBaseStats() const;
 
-  // Applies permanent, one-shot (then consumed), and temp (self-managed via
-  // time) passives in a single step. Passives returning alive=false are
-  // removed. Not const: mutates one_shot_/temp_ passives.
+  // Applies all passives in a single step. Passives returning alive=false are
+  // removed after their bonus is applied. Not const: mutates passives.
   Stats applyPassives(const Stats &base, const Stats &final, Type time = 0.0);
 
   [[nodiscard]] static Type getDeltaStats(const Stats &stats1,
-                                          const Stats &stats2);
+                                           const Stats &stats2);
 
   [[nodiscard]] Stats evaluateChampion(Type eps = 0.01,
-                                       std::size_t max_iter = 1000);
+                                        std::size_t max_iter = 1000);
 };
 
 } // namespace moba

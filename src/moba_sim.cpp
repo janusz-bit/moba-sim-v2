@@ -12,27 +12,18 @@ namespace {
   return out;
 }
 
-// Applies all passives (perm + one_shot + temp) in a single step without
-// removing anything. Records the `alive` flag of each temp passive at `idx`
-// so the caller can prune after convergence.
+// Applies all passives in a single step without removing any. Records the
+// `alive` flag of each passive so the caller can prune after convergence.
 [[nodiscard]] Champion::Stats
-applyAllPassivesNoRemove(const std::vector<Champion::Passive> &passives,
-                         const std::vector<Champion::Passive> &one_shot,
-                         const std::vector<Champion::Passive> &temp,
-                         const Champion::Stats &base, const Champion::Stats &final,
-                         Type time, std::vector<bool> &temp_alive) {
+applyPassivesNoRemove(const std::vector<Champion::Passive> &passives,
+                     const Champion::Stats &base, const Champion::Stats &final,
+                     Type time, std::vector<bool> &alive_flags) {
   Champion::Stats out = base;
+  alive_flags.clear();
   for (const auto &passive : passives) {
-    out = addStats(out, passive(base, final, time).bonus);
-  }
-  for (const auto &passive : one_shot) {
-    out = addStats(out, passive(base, final, time).bonus);
-  }
-  temp_alive.clear();
-  for (const auto &passive : temp) {
     auto result = passive(base, final, time);
     out = addStats(out, result.bonus);
-    temp_alive.push_back(result.alive);
+    alive_flags.push_back(result.alive);
   }
   return out;
 }
@@ -156,27 +147,20 @@ Champion::Stats Champion::getBaseStats() const {
 Champion::Stats Champion::applyPassives(const Stats &base,
                                          const Stats &final, Type time) {
   Stats bonus{};
-  for (const auto &passive : passives) {
-    bonus = addStats(bonus, passive(base, final, time).bonus);
-  }
-  for (auto it = one_shot_passives.begin(); it != one_shot_passives.end();) {
-    bonus = addStats(bonus, (*it)(base, final, time).bonus);
-    it = one_shot_passives.erase(it);
-  }
-  for (auto it = temp_passives.begin(); it != temp_passives.end();) {
+  for (auto it = passives.begin(); it != passives.end();) {
     auto result = (*it)(base, final, time);
     bonus = addStats(bonus, result.bonus);
     if (result.alive) {
       ++it;
     } else {
-      it = temp_passives.erase(it);
+      it = passives.erase(it);
     }
   }
   return addStats(base, bonus);
 }
 
 Type Champion::getDeltaStats(const Stats &stats1,
-                                            const Stats &stats2) {
+                                             const Stats &stats2) {
   Type delta = 0;
   for (std::size_t i = 0; i < std::to_underlying(Stat::Count); ++i) {
     Type delta_now = std::abs(stats2[i] - stats1[i]);
@@ -190,11 +174,10 @@ Champion::Stats Champion::evaluateChampion(Type eps, std::size_t max_iter) {
   Stats final = base;
   Stats prev = base;
   std::size_t iter = 0;
-  std::vector<bool> temp_alive;
+  std::vector<bool> alive_flags;
   do {
     prev = final;
-    final = applyAllPassivesNoRemove(passives, one_shot_passives, temp_passives,
-                                     base, prev, 0.0, temp_alive);
+    final = applyPassivesNoRemove(passives, base, prev, 0.0, alive_flags);
     ++iter;
   } while (getDeltaStats(final, prev) > eps && iter < max_iter);
   if (iter >= max_iter && getDeltaStats(final, prev) > eps) {
@@ -203,15 +186,13 @@ Champion::Stats Champion::evaluateChampion(Type eps, std::size_t max_iter) {
         " iterations (eps=" + std::to_string(eps) + ", delta=" +
         std::to_string(getDeltaStats(final, prev)) + ")");
   }
-  // one-shot passives are always consumed after evaluation
-  one_shot_passives.clear();
-  // temp passives that reported alive=false on the final iteration are removed
-  for (auto it = temp_passives.begin(); it != temp_passives.end();) {
-    if (!temp_alive.empty() &&
-        !temp_alive[static_cast<std::size_t>(it - temp_passives.begin())]) {
-      it = temp_passives.erase(it);
+  // remove passives that reported alive=false on the final iteration
+  for (std::size_t i = 0; i < passives.size() && i < alive_flags.size();) {
+    if (!alive_flags[i]) {
+      passives.erase(passives.begin() + static_cast<std::ptrdiff_t>(i));
+      alive_flags.erase(alive_flags.begin() + static_cast<std::ptrdiff_t>(i));
     } else {
-      ++it;
+      ++i;
     }
   }
   return final;

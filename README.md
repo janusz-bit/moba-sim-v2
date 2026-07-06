@@ -64,48 +64,44 @@ PassiveResult(const Stats &base, const Stats &final, Type time) -> { Stats bonus
   (absolute simulation time, starts at 0 and only increases).
 - Returns a `bonus` (delta added to `final`) and an `alive` flag.
 
-A passive **manages its own lifetime** — it may capture a `start_time` and
-`duration`, check `time - start < duration`, reset itself, or change its effect.
-The framework knows nothing about time/counters/handles; the passive is a black
+A passive **is the sole authority on its lifetime** via the `alive` flag:
+
+- **permanent**: always returns `alive=true` (never removed)
+- **one-shot**: returns `alive=false` after its single application
+- **temp**: returns `alive=false` once it decides to expire (e.g. by capturing
+  a start time and checking `time - start < duration`)
+
+All passives live in a single `passives` queue. The framework treats them
+uniformly: call, sum the bonus, remove if `alive=false`. A passive may capture
+a `start_time` and `duration`, reset itself, or change its effect — the
+framework knows nothing about time/counters/handles; the passive is a black
 box with access to `time`.
-
-## Three passive queues
-
-| Queue              | Behavior              | Removed when                            |
-|--------------------|-----------------------|-----------------------------------------|
-| `passives`          | permanent, `alive` ignored | never                              |
-| `one_shot_passives` | applied once          | after a single `applyPassives` call     |
-| `temp_passives`     | self-managed via time | when returning `alive=false`            |
 
 ## `applyPassives(base, final, time)` — one simulation step
 
-Applies all three queues in a single step:
+Applies all passives in a single step:
 
-1. Sums bonuses from permanent `passives`.
-2. Sums bonuses from `one_shot_passives`, then **clears** the queue.
-3. For each `temp_passive`: calls it, sums the bonus; if `alive=false`, erases
-   it (using the iterator returned by `erase`).
+1. For each passive: call it, sum the bonus.
+2. If `alive=false`, erase it (using the iterator returned by `erase`); the
+   bonus is still applied for this step.
 
-Returns `base + sum(bonuses)`. Mutates `one_shot_passives` and `temp_passives`.
+Returns `base + sum(bonuses)`. Mutates `passives` (removes expired/one-shot).
 
 ## `evaluateChampion(eps, max_iter)` — fixed-point of all passives
 
-Iterates **all three queues** (perm + one_shot + temp) to resolve fixed-point
-interactions, but **does not remove** passives during iteration — passives are
-applied repeatedly with `time = 0.0` (the fixed-point is immediate, not a
-simulation step). After convergence:
-
-- `one_shot_passives` are always cleared (consumed by the evaluation).
-- `temp_passives` returning `alive=false` on the final iteration are removed;
-  those with `alive=true` stay.
+Iterates **all passives** to resolve fixed-point interactions, but **does not
+remove** any during iteration — passives are applied repeatedly with
+`time = 0.0` (the fixed-point is immediate, not a simulation step). After
+convergence, passives that returned `alive=false` on the final iteration are
+removed; those with `alive=true` stay.
 
 ```
 final = base
 repeat:
   prev = final
-  final = base + sum(passive(base, prev, 0.0))   // all queues, no removal
+  final = base + sum(passive(base, prev, 0.0))   // no removal during iteration
 until delta(final, prev) <= eps  or  iter >= max_iter
-then: clear one_shot; remove temp where alive=false
+then: remove passives where alive=false (from the final iteration)
 ```
 
 Throws `ConvergenceError` if not converged within `max_iter`.
@@ -120,24 +116,24 @@ c.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
 c.passives.push_back([](const Stats &base, const Stats &final, Type) {
   Stats bonus{};
   bonus[std::to_underlying(Stat::AD)] = 10.0;
-  return Champion::PassiveResult{bonus, true};
+  return Champion::PassiveResult{bonus, true};  // permanent
 });
-Stats final = c.evaluateChampion();  // fixed-point of permanent passives
+Stats final = c.evaluateChampion();  // fixed-point of all passives
 ```
 
 **Time-based simulation:**
 
 ```cpp
 for (double t = 0.0; t < 10.0; t += dt) {
-  Stats final = c.applyPassives(base, final, t);  // perm + one_shot + temp
-  // one_shot vanish after 1 step; temp expire when they decide
+  Stats final = c.applyPassives(base, final, t);  // all passives, remove expired
+  // one-shot vanish after 1 step; temp expire when they return alive=false
 }
 ```
 
 **Temp passive** (e.g. a burn lasting 3 seconds):
 
 ```cpp
-c.temp_passives.push_back(
+c.passives.push_back(
     [start = 2.0, duration = 3.0](const Stats &, const Stats &, Type time) {
       Stats bonus{};
       bonus[std::to_underlying(Stat::AD)] = 10.0;
@@ -145,4 +141,14 @@ c.temp_passives.push_back(
     });
 ```
 
-To refresh an effect, re-insert a new passive with an updated `start`.
+**One-shot passive** (e.g. a burst that fires once):
+
+```cpp
+c.passives.push_back([](const Stats &, const Stats &, Type) {
+  Stats bonus{};
+  bonus[std::to_underlying(Stat::AD)] = 20.0;
+  return Champion::PassiveResult{bonus, false};  // alive=false → removed after applying
+});
+```
+
+To refresh a temp effect, re-insert a new passive with an updated `start`.
