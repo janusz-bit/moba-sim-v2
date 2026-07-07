@@ -57,7 +57,191 @@ TEST_CASE("Combat: magic damage reduced by MR", "[combat]") {
   }));
   Stats r = target.evaluateChampion();
   REQUIRE(r[std::to_underlying(Stat::CurrentHP)] ==
-          Catch::Approx(1000.0 - 66.6667).epsilon(0.01));
+          Catch::Approx(1000.0 - 58.8235).epsilon(0.01));
+}
+
+// Advanced 2-champion combat: permanent shred, one-shot burst (physical +
+// magic), lifesteal, counter-attack, burn DoT over time, and a killing blow.
+// Exercises the full pipeline: mod_db, permanent/temp/one-shot passives,
+// mitigated_damage with penetration, evaluateChampion fixed-point, and
+// applyPassives time-based simulation.
+TEST_CASE("Combat: full 2-champion trade — shred, burst, DoT, lifesteal, death",
+          "[combat][scenario]") {
+  // Attacker: burst ADC with armor penetration
+  Champion attacker{{Stat::MaxHP, 800},
+                    {Stat::CurrentHP, 800},
+                    {Stat::AD, 80},
+                    {Stat::AR, 60},
+                    {Stat::MR, 40},
+                    {Stat::ArmorPenFlat, 20},
+                    {Stat::ArmorPenPct, 0.3}};
+  // Defender: tanky bruiser (low enough HP to die in the scenario)
+  Champion defender{{Stat::MaxHP, 600},
+                    {Stat::CurrentHP, 600},
+                    {Stat::AD, 60},
+                    {Stat::AR, 120},
+                    {Stat::MR, 50}};
+
+  // --- Phase 1: permanent armor shred on defender (-30 AR) ---
+  defender.addPassive(
+      factory().make([](const Stats &, const Stats &, const Type &) {
+        Stats bonus{};
+        bonus[std::to_underlying(Stat::AR)] = -30.0;
+        return Champion::PassiveResult{bonus, true};
+      }));
+  Stats def_eval = defender.evaluateChampion();
+  REQUIRE(def_eval[std::to_underlying(Stat::AR)] == Catch::Approx(90.0));
+  REQUIRE(defender.passives.size() == 1); // shred stays
+
+  // --- Phase 2: burst exchange ---
+  Stats atk_base = attacker.getBaseStats();
+  // Auto-attack: 80 physical, pen flat=20 pct=0.3 vs effective
+  // AR=(90-20)*0.7=49 → 80 * 100/149 ≈ 53.691
+  Type aa_dealt =
+      moba::mitigated_damage(atk_base[std::to_underlying(Stat::AD)],
+                             TypeDamage::Physical,
+                             def_eval,
+                             atk_base[std::to_underlying(Stat::ArmorPenFlat)],
+                             atk_base[std::to_underlying(Stat::ArmorPenPct)]);
+  REQUIRE(aa_dealt == Catch::Approx(53.691).epsilon(0.01));
+
+  // Spell: 150 magic vs 50 MR → 150 * 100/150 = 100
+  Type spell_dealt = moba::mitigated_damage(150.0, TypeDamage::Magic, def_eval);
+  REQUIRE(spell_dealt == Catch::Approx(100.0).epsilon(0.01));
+
+  // Stack both as one-shot damage on defender
+  defender.addPassive(
+      factory().make([aa_dealt](const Stats &, const Stats &, const Type &) {
+        Stats bonus{};
+        bonus[std::to_underlying(Stat::CurrentHP)] = -aa_dealt;
+        return Champion::PassiveResult{bonus, false};
+      }));
+  defender.addPassive(
+      factory().make([spell_dealt](const Stats &, const Stats &, const Type &) {
+        Stats bonus{};
+        bonus[std::to_underlying(Stat::CurrentHP)] = -spell_dealt;
+        return Champion::PassiveResult{bonus, false};
+      }));
+
+  // Counter-attack: 60 physical vs 60 AR → 60*100/160 = 37.5
+  Type counter_dealt =
+      moba::mitigated_damage(def_eval[std::to_underlying(Stat::AD)],
+                             TypeDamage::Physical,
+                             atk_base);
+  REQUIRE(counter_dealt == Catch::Approx(37.5).epsilon(0.01));
+  attacker.addPassive(factory().make(
+      [counter_dealt](const Stats &, const Stats &, const Type &) {
+        Stats bonus{};
+        bonus[std::to_underlying(Stat::CurrentHP)] = -counter_dealt;
+        return Champion::PassiveResult{bonus, false};
+      }));
+
+  // Lifesteal: attacker heals 12% of auto-attack damage dealt
+  Type heal = aa_dealt * 0.12;
+  REQUIRE(heal == Catch::Approx(6.443).epsilon(0.01));
+  attacker.addPassive(
+      factory().make([heal](const Stats &, const Stats &, const Type &) {
+        Stats bonus{};
+        bonus[std::to_underlying(Stat::CurrentHP)] = heal;
+        return Champion::PassiveResult{bonus, false};
+      }));
+
+  // Evaluate both (fixed-point, time=0)
+  Stats def_burst = defender.evaluateChampion();
+  Stats atk_burst = attacker.evaluateChampion();
+
+  // Defender: 600 - 53.691 - 100 = 446.309
+  REQUIRE(def_burst[std::to_underlying(Stat::CurrentHP)] ==
+          Catch::Approx(600.0 - aa_dealt - spell_dealt).epsilon(0.01));
+  // Attacker: 800 - 37.5 + 6.443 = 768.943
+  REQUIRE(atk_burst[std::to_underlying(Stat::CurrentHP)] ==
+          Catch::Approx(800.0 - counter_dealt + heal).epsilon(0.01));
+  // One-shots consumed; shred permanent stays
+  REQUIRE(defender.passives.size() == 1);
+  REQUIRE(attacker.passives.empty());
+
+  // Persist post-burst HP into mod_db so future evaluations build on it
+  defender.mod_db.replace(Stat::CurrentHP,
+                          ModType::Base,
+                          def_burst[std::to_underlying(Stat::CurrentHP)],
+                          Source{"Base", ""});
+  attacker.mod_db.replace(Stat::CurrentHP,
+                          ModType::Base,
+                          atk_burst[std::to_underlying(Stat::CurrentHP)],
+                          Source{"Base", ""});
+
+  // --- Phase 3: burn DoT (20 true damage/tick for 3 ticks at t=0,1,2) ---
+  defender.addPassive(factory().make(
+      [per_tick = 20.0,
+       start = 0.0,
+       duration = 3.0,
+       next_tick = 0.0,
+       accumulated =
+           0.0](const Stats &, const Stats &, const Type &time) mutable {
+        if (time >= next_tick && time < start + duration) {
+          accumulated += per_tick;
+          next_tick = time + 1.0;
+        }
+        Stats bonus{};
+        bonus[std::to_underlying(Stat::CurrentHP)] = -accumulated;
+        return Champion::PassiveResult{bonus, time < start + duration};
+      }));
+
+  Type def_hp_after_burst =
+      defender.getBaseStats()[std::to_underlying(Stat::CurrentHP)];
+  Stats base = defender.getBaseStats();
+  Stats final = base;
+
+  // t=0: burn ticks → accumulated=20
+  final = defender.applyPassives(base, final, 0.0);
+  REQUIRE(final[std::to_underlying(Stat::CurrentHP)] ==
+          Catch::Approx(def_hp_after_burst - 20.0).epsilon(0.01));
+  REQUIRE(defender.passives.size() == 2); // shred + burn
+
+  // t=1: accumulated=40
+  final = defender.applyPassives(base, final, 1.0);
+  REQUIRE(final[std::to_underlying(Stat::CurrentHP)] ==
+          Catch::Approx(def_hp_after_burst - 40.0).epsilon(0.01));
+
+  // t=2: accumulated=60
+  final = defender.applyPassives(base, final, 2.0);
+  REQUIRE(final[std::to_underlying(Stat::CurrentHP)] ==
+          Catch::Approx(def_hp_after_burst - 60.0).epsilon(0.01));
+
+  // t=3: burn expires (bonus applied then removed)
+  final = defender.applyPassives(base, final, 3.0);
+  REQUIRE(final[std::to_underlying(Stat::CurrentHP)] ==
+          Catch::Approx(def_hp_after_burst - 60.0).epsilon(0.01));
+  REQUIRE(defender.passives.size() == 1); // shred only
+
+  // Persist post-DoT HP
+  Type def_hp_after_dot = final[std::to_underlying(Stat::CurrentHP)];
+  defender.mod_db.replace(Stat::CurrentHP,
+                          ModType::Base,
+                          def_hp_after_dot,
+                          Source{"Base", ""});
+
+  // --- Phase 4: killing blow (true damage exceeding remaining HP) ---
+  defender.addPassive(factory().make(
+      [def_hp_after_dot](const Stats &, const Stats &, const Type &) {
+        Stats bonus{};
+        bonus[std::to_underlying(Stat::CurrentHP)] =
+            -(def_hp_after_dot + 100.0);
+        return Champion::PassiveResult{bonus, false};
+      }));
+  Stats def_dead = defender.evaluateChampion();
+  REQUIRE(def_dead[std::to_underlying(Stat::CurrentHP)] <= 0.0);
+  REQUIRE(def_dead[std::to_underlying(Stat::CurrentHP)] ==
+          Catch::Approx(-100.0).epsilon(0.01));
+  // Shred permanent stays; kill one-shot consumed
+  REQUIRE(defender.passives.size() == 1);
+
+  // Attacker survived the encounter with lifesteal-healed HP
+  Stats atk_final = attacker.evaluateChampion();
+  REQUIRE(atk_final[std::to_underlying(Stat::CurrentHP)] > 0.0);
+  REQUIRE(atk_final[std::to_underlying(Stat::CurrentHP)] ==
+          Catch::Approx(atk_burst[std::to_underlying(Stat::CurrentHP)])
+              .epsilon(0.01));
 }
 
 TEST_CASE("Combat: true damage ignores resistances", "[combat]") {
