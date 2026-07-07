@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -12,10 +13,10 @@
 namespace moba {
 using Type = double;
 
-// Post-mitigation physical damage after armor reduction.
+// Post-mitigation damage after resistance reduction.
 // See: https://wiki.leagueoflegends.com/en-us/Armor
 Type post_mitigation_damage(const Type &raw_damage,
-                            const Type &resistanse) noexcept;
+                            const Type &resistance) noexcept;
 
 enum class Stat : std::uint8_t {
   MaxHP,
@@ -41,16 +42,18 @@ enum class ModType : std::uint8_t {
 };
 
 enum class TypeDamage : std::uint8_t { Physical, Magic, True };
-enum class KindDamage : std::uint8_t { AutoAttack, OnHit, Spell };
-
-inline std::string statToString(Stat stat);
 
 struct Source {
   std::string name;
   std::string description;
 
-  Source(std::initializer_list<std::string> list)
-      : name(list.begin()[0]), description(list.begin()[1]) {}
+  Source(std::string n = {}, std::string d = {})
+      : name(std::move(n)), description(std::move(d)) {}
+  Source(std::initializer_list<std::string> list) {
+    const auto *it = list.begin();
+    name = (it != list.end()) ? *it++ : std::string{};
+    description = (it != list.end()) ? *it++ : std::string{};
+  }
 
   bool operator==(const Source &) const = default;
 };
@@ -59,7 +62,7 @@ struct Modifier {
   Stat stat{};
   ModType type{};
   Type value{};
-  Source source{};
+  Source source;
 };
 
 class ModDB {
@@ -165,5 +168,21 @@ struct Champion {
   [[nodiscard]] Stats evaluateChampion(Type eps = 0.01,
                                        std::size_t max_iter = 1000);
 };
+
+// Damage after applying flat and percentage penetration, then resistance
+// mitigation. True damage bypasses mitigation. `target` is the target's
+// final stats (resistance read from AR/MR depending on `type`).
+[[nodiscard]] Type mitigated_damage(Type raw_damage, TypeDamage type,
+                                    const Champion::Stats &target,
+                                    Type flat_pen = 0.0,
+                                    Type pct_pen = 0.0) noexcept;
+
+// Convenience accessors for Stats indexed by Stat enum.
+[[nodiscard]] inline Type getStat(const Champion::Stats &stats, Stat stat) {
+  return stats[std::to_underlying(stat)];
+}
+inline void setStat(Champion::Stats &stats, Stat stat, Type value) {
+  stats[std::to_underlying(stat)] = value;
+}
 
 } // namespace moba

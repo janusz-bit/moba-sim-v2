@@ -1,5 +1,6 @@
 #include "moba_sim.hpp"
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 namespace moba {
 
@@ -31,47 +32,11 @@ applyPassivesNoRemove(const std::vector<Champion::PassiveEntry> &passives,
 } // namespace
 
 Type post_mitigation_damage(const Type &raw_damage,
-                            const Type &resistanse) noexcept {
-  if (resistanse >= 0) {
-    return raw_damage * 100.0 / (100.0 + resistanse);
+                            const Type &resistance) noexcept {
+  if (resistance >= 0) {
+    return raw_damage * 100.0 / (100.0 + resistance);
   }
-  return raw_damage * (2.0 - (100.0 / (100.0 - resistanse)));
-}
-
-inline std::string statToString(Stat stat) {
-  switch (stat) {
-  case Stat::MaxHP:
-    return "MaxHP";
-  case Stat::CurrentHP:
-    return "CurrentHP";
-  case Stat::Mana:
-    return "Mana";
-  case Stat::CurrentMana:
-    return "CurrentMana";
-  case Stat::AP:
-    return "AP";
-  case Stat::AD:
-    return "AD";
-  case Stat::MS:
-    return "MS";
-  case Stat::AR:
-    return "Armor";
-  case Stat::MR:
-    return "MR";
-  case Stat::CDR:
-    return "CDR";
-  case Stat::ArmorPenFlat:
-    return "ArmorPenFlat";
-  case Stat::ArmorPenPct:
-    return "ArmorPenPct";
-  case Stat::MagicPenFlat:
-    return "MagicPenFlat";
-  case Stat::MagicPenPct:
-    return "MagicPenPct";
-  case Stat::Count:
-    throw std::invalid_argument("Invalid stat");
-  }
-  throw std::invalid_argument("Invalid stat");
+  return raw_damage * (2.0 - (100.0 / (100.0 - resistance)));
 }
 
 void ModDB::add(const Stat &stat, const ModType &type, const Type &value,
@@ -219,16 +184,30 @@ Champion::Stats Champion::evaluateChampion(Type eps, std::size_t max_iter) {
         " iterations (eps=" + std::to_string(eps) +
         ", delta=" + std::to_string(getDeltaStats(final, prev)) + ")");
   }
-  // remove passives that reported alive=false on the final iteration
-  for (std::size_t i = 0; i < passives.size() && i < alive_flags.size();) {
-    if (!alive_flags[i]) {
-      passives.erase(passives.begin() + static_cast<std::ptrdiff_t>(i));
-      alive_flags.erase(alive_flags.begin() + static_cast<std::ptrdiff_t>(i));
-    } else {
-      ++i;
-    }
+  // Remove passives that reported alive=false on the final iteration. Flags
+  // are aligned with passives by index (applyPassivesNoRemove appends one flag
+  // per passive, in order).
+  if (alive_flags.size() == passives.size()) {
+    std::size_t idx = 0;
+    std::erase_if(passives, [&](const PassiveEntry &) {
+      const bool dead = (idx < alive_flags.size()) && !alive_flags[idx];
+      ++idx;
+      return dead;
+    });
   }
   return final;
+}
+
+Type mitigated_damage(Type raw_damage, TypeDamage type,
+                      const Champion::Stats &target, Type flat_pen,
+                      Type pct_pen) noexcept {
+  if (type == TypeDamage::True) {
+    return raw_damage;
+  }
+  const Stat resist_stat = (type == TypeDamage::Physical) ? Stat::AR : Stat::MR;
+  Type res = target[std::to_underlying(resist_stat)];
+  res = (res - flat_pen) * (1.0 - pct_pen);
+  return post_mitigation_damage(raw_damage, res);
 }
 
 } // namespace moba
