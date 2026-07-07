@@ -137,7 +137,7 @@ Throws `ConvergenceError` if not converged within `max_iter`.
 **Static champion** (no time):
 
 ```cpp
-Champion c{{Stat::HP, 1000}, {Stat::AD, 50}, {Stat::AR, 100}};
+Champion c{{Stat::MaxHP, 1000}, {Stat::AD, 50}, {Stat::AR, 100}};
 Champion::PassiveFactory factory;
 c.addPassive(factory.make([](const Stats &base, const Stats &final, const Type &) {
   Stats bonus{};
@@ -199,7 +199,7 @@ temp, etc.); the wrapper only applies mitigation.
 Champion::PassiveFactory factory;
 Champion::Passive inner = [](const Stats &, const Stats &, Type) {
   Stats bonus{};
-  bonus[std::to_underlying(Stat::HP)] = -100.0;
+  bonus[std::to_underlying(Stat::MaxHP)] = -100.0;
   return Champion::PassiveResult{bonus, false};  // one-shot, 100 raw
 };
 Stats target_final = target.evaluateChampion();

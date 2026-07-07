@@ -40,8 +40,14 @@ Type post_mitigation_damage(const Type &raw_damage,
 
 inline std::string statToString(Stat stat) {
   switch (stat) {
-  case Stat::HP:
-    return "HP";
+  case Stat::MaxHP:
+    return "MaxHP";
+  case Stat::CurrentHP:
+    return "CurrentHP";
+  case Stat::Mana:
+    return "Mana";
+  case Stat::CurrentMana:
+    return "CurrentMana";
   case Stat::AP:
     return "AP";
   case Stat::AD:
@@ -54,34 +60,18 @@ inline std::string statToString(Stat stat) {
     return "MR";
   case Stat::CDR:
     return "CDR";
+  case Stat::ArmorPenFlat:
+    return "ArmorPenFlat";
+  case Stat::ArmorPenPct:
+    return "ArmorPenPct";
+  case Stat::MagicPenFlat:
+    return "MagicPenFlat";
+  case Stat::MagicPenPct:
+    return "MagicPenPct";
   case Stat::Count:
     throw std::invalid_argument("Invalid stat");
   }
   throw std::invalid_argument("Invalid stat");
-}
-
-Champion::PassiveEntry
-Champion::PassiveFactory::makeDamage(Passive inner, TypeDamage type,
-                                     Type flat_pen, Type pct_pen,
-                                     const Stats &target_final) {
-  return make([inner = std::move(inner), type, flat_pen, pct_pen, target_final](
-                  const Stats &base,
-                  const Stats &final,
-                  Type time) -> PassiveResult {
-    auto result = inner(base, final, time);
-    const Type raw_amount = -result.bonus[std::to_underlying(Stat::HP)];
-    if (type == TypeDamage::True) {
-      result.bonus[std::to_underlying(Stat::HP)] = -raw_amount;
-      return result;
-    }
-    const Stat resist_stat =
-        (type == TypeDamage::Physical) ? Stat::AR : Stat::MR;
-    Type res = target_final[std::to_underlying(resist_stat)];
-    res = (res - flat_pen) * (1.0 - pct_pen);
-    result.bonus[std::to_underlying(Stat::HP)] =
-        -post_mitigation_damage(raw_amount, res);
-    return result;
-  });
 }
 
 void ModDB::add(const Stat &stat, const ModType &type, const Type &value,

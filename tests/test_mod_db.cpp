@@ -24,10 +24,10 @@ TEST_CASE("ModDB remove by stat/type/source erases first match", "[mod_db]") {
   ModDB db;
   Source src{"Item", "desc"};
   db.add(Stat::AD, ModType::Base, 10.0, src);
-  db.add(Stat::HP, ModType::Base, 20.0, src);
+  db.add(Stat::MaxHP, ModType::Base, 20.0, src);
   db.remove(Stat::AD, ModType::Base, src);
   REQUIRE(db.get_mods().size() == 1);
-  REQUIRE(db.get_mods()[0].stat == Stat::HP);
+  REQUIRE(db.get_mods()[0].stat == Stat::MaxHP);
 }
 
 TEST_CASE("ModDB remove by stat/type/source is no-op when not found",
@@ -35,7 +35,7 @@ TEST_CASE("ModDB remove by stat/type/source is no-op when not found",
   ModDB db;
   Source src{"Item", "desc"};
   db.add(Stat::AD, ModType::Base, 10.0, src);
-  db.remove(Stat::HP, ModType::Base, src);
+  db.remove(Stat::MaxHP, ModType::Base, src);
   REQUIRE(db.get_mods().size() == 1);
 }
 
@@ -45,10 +45,10 @@ TEST_CASE("ModDB remove by predicate erases all matching", "[mod_db]") {
   Source src2{"Buff", "desc"};
   db.add(Stat::AD, ModType::Base, 10.0, src1);
   db.add(Stat::AD, ModType::Base, 20.0, src2);
-  db.add(Stat::HP, ModType::Base, 30.0, src1);
+  db.add(Stat::MaxHP, ModType::Base, 30.0, src1);
   db.remove([](const Modifier &m) { return m.stat == Stat::AD; });
   REQUIRE(db.get_mods().size() == 1);
-  REQUIRE(db.get_mods()[0].stat == Stat::HP);
+  REQUIRE(db.get_mods()[0].stat == Stat::MaxHP);
 }
 
 TEST_CASE("ModDB replace inserts when not present", "[mod_db]") {
@@ -74,10 +74,10 @@ TEST_CASE("ModDB getSumStat sums Base modifiers for matching stat",
   Source src{"Item", ""};
   db.add(Stat::AD, ModType::Base, 10.0, src);
   db.add(Stat::AD, ModType::Base, 20.0, src);
-  db.add(Stat::HP, ModType::Base, 30.0, src);
+  db.add(Stat::MaxHP, ModType::Base, 30.0, src);
   db.add(Stat::AD, ModType::Inc, 0.1, src);
   REQUIRE(db.getSumStat(Stat::AD) == Catch::Approx(30.0));
-  REQUIRE(db.getSumStat(Stat::HP) == Catch::Approx(30.0));
+  REQUIRE(db.getSumStat(Stat::MaxHP) == Catch::Approx(30.0));
   REQUIRE(db.getSumStat(Stat::AP) == Catch::Approx(0.0));
 }
 
@@ -134,12 +134,12 @@ TEST_CASE("ModDB multiple modifiers of same stat and type aggregate",
           "[mod_db]") {
   ModDB db;
   Source src{"Item", ""};
-  db.add(Stat::HP, ModType::Base, 100.0, src);
-  db.add(Stat::HP, ModType::Base, 200.0, src);
-  db.add(Stat::HP, ModType::Inc, 0.5, src);
-  db.add(Stat::HP, ModType::More, 2.0, src);
+  db.add(Stat::MaxHP, ModType::Base, 100.0, src);
+  db.add(Stat::MaxHP, ModType::Base, 200.0, src);
+  db.add(Stat::MaxHP, ModType::Inc, 0.5, src);
+  db.add(Stat::MaxHP, ModType::More, 2.0, src);
   // sum=300, inc=1.5, more=2.0 → 300*1.5*2.0=900
-  REQUIRE(db.getStat(Stat::HP) == Catch::Approx(900.0));
+  REQUIRE(db.getStat(Stat::MaxHP) == Catch::Approx(900.0));
 }
 
 // --- additional coverage tests ---
@@ -194,14 +194,14 @@ TEST_CASE("ModDB getMoreStat with zero value zeroes the stat", "[mod_db]") {
 TEST_CASE("ModDB getStat for each Stat enum value independently", "[mod_db]") {
   ModDB db;
   Source src{"Base", ""};
-  db.add(Stat::HP, ModType::Base, 100.0, src);
+  db.add(Stat::MaxHP, ModType::Base, 100.0, src);
   db.add(Stat::AP, ModType::Base, 50.0, src);
   db.add(Stat::AD, ModType::Base, 70.0, src);
   db.add(Stat::MS, ModType::Base, 350.0, src);
   db.add(Stat::AR, ModType::Base, 30.0, src);
   db.add(Stat::MR, ModType::Base, 40.0, src);
   db.add(Stat::CDR, ModType::Base, 20.0, src);
-  REQUIRE(db.getStat(Stat::HP) == Catch::Approx(100.0));
+  REQUIRE(db.getStat(Stat::MaxHP) == Catch::Approx(100.0));
   REQUIRE(db.getStat(Stat::AP) == Catch::Approx(50.0));
   REQUIRE(db.getStat(Stat::AD) == Catch::Approx(70.0));
   REQUIRE(db.getStat(Stat::MS) == Catch::Approx(350.0));
@@ -255,7 +255,7 @@ TEST_CASE(
   ModDB db;
   Source src{"Item", ""};
   db.add(Stat::AD, ModType::Base, 10.0, src);
-  db.add(Stat::HP, ModType::Base, 20.0, src);
+  db.add(Stat::MaxHP, ModType::Base, 20.0, src);
   db.remove([](const Modifier &m) { return m.stat == Stat::AP; });
   REQUIRE(db.get_mods().size() == 2);
 }
@@ -266,7 +266,7 @@ TEST_CASE(
   ModDB db;
   Source src{"Item", ""};
   db.add(Stat::AD, ModType::Base, 10.0, src);
-  db.add(Stat::HP, ModType::Base, 20.0, src);
+  db.add(Stat::MaxHP, ModType::Base, 20.0, src);
   db.add(Stat::AP, ModType::Inc, 0.1, src);
   db.remove([](const Modifier &) { return true; });
   REQUIRE(db.get_mods().empty());
@@ -275,12 +275,12 @@ TEST_CASE(
 TEST_CASE("ModDB replace preserves other modifiers", "[mod_db]") {
   ModDB db;
   Source src{"Item", ""};
-  db.add(Stat::HP, ModType::Base, 100.0, src);
+  db.add(Stat::MaxHP, ModType::Base, 100.0, src);
   db.add(Stat::AD, ModType::Base, 50.0, src);
   db.replace(Stat::AD, ModType::Base, 75.0, src);
   REQUIRE(db.get_mods().size() == 2);
   REQUIRE(db.getStat(Stat::AD) == Catch::Approx(75.0));
-  REQUIRE(db.getStat(Stat::HP) == Catch::Approx(100.0));
+  REQUIRE(db.getStat(Stat::MaxHP) == Catch::Approx(100.0));
 }
 
 TEST_CASE("ModDB replace with different source inserts new, keeps old",

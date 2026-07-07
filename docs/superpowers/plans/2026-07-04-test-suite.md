@@ -279,17 +279,17 @@ TEST_CASE("ModDB remove by stat/type/source erases first match", "[mod_db]") {
   ModDB db;
   Source src{"Item", "desc"};
   db.add(Stat::AD, ModType::Base, 10.0, src);
-  db.add(Stat::HP, ModType::Base, 20.0, src);
+  db.add(Stat::MaxHP, ModType::Base, 20.0, src);
   db.remove(Stat::AD, ModType::Base, src);
   REQUIRE(db.get_mods().size() == 1);
-  REQUIRE(db.get_mods()[0].stat == Stat::HP);
+  REQUIRE(db.get_mods()[0].stat == Stat::MaxHP);
 }
 
 TEST_CASE("ModDB remove by stat/type/source is no-op when not found", "[mod_db]") {
   ModDB db;
   Source src{"Item", "desc"};
   db.add(Stat::AD, ModType::Base, 10.0, src);
-  db.remove(Stat::HP, ModType::Base, src);
+  db.remove(Stat::MaxHP, ModType::Base, src);
   REQUIRE(db.get_mods().size() == 1);
 }
 
@@ -299,10 +299,10 @@ TEST_CASE("ModDB remove by predicate erases all matching", "[mod_db]") {
   Source src2{"Buff", "desc"};
   db.add(Stat::AD, ModType::Base, 10.0, src1);
   db.add(Stat::AD, ModType::Base, 20.0, src2);
-  db.add(Stat::HP, ModType::Base, 30.0, src1);
+  db.add(Stat::MaxHP, ModType::Base, 30.0, src1);
   db.remove([](const Modifier &m) { return m.stat == Stat::AD; });
   REQUIRE(db.get_mods().size() == 1);
-  REQUIRE(db.get_mods()[0].stat == Stat::HP);
+  REQUIRE(db.get_mods()[0].stat == Stat::MaxHP);
 }
 
 TEST_CASE("ModDB replace inserts when not present", "[mod_db]") {
@@ -327,10 +327,10 @@ TEST_CASE("ModDB getSumStat sums Base modifiers for matching stat", "[mod_db]") 
   Source src{"Item", ""};
   db.add(Stat::AD, ModType::Base, 10.0, src);
   db.add(Stat::AD, ModType::Base, 20.0, src);
-  db.add(Stat::HP, ModType::Base, 30.0, src);
+  db.add(Stat::MaxHP, ModType::Base, 30.0, src);
   db.add(Stat::AD, ModType::Inc, 0.1, src);
   REQUIRE(db.getSumStat(Stat::AD) == Catch::Approx(30.0));
-  REQUIRE(db.getSumStat(Stat::HP) == Catch::Approx(30.0));
+  REQUIRE(db.getSumStat(Stat::MaxHP) == Catch::Approx(30.0));
   REQUIRE(db.getSumStat(Stat::AP) == Catch::Approx(0.0));
 }
 
@@ -386,12 +386,12 @@ TEST_CASE("ModDB getters respect predicate filtering by source", "[mod_db]") {
 TEST_CASE("ModDB multiple modifiers of same stat and type aggregate", "[mod_db]") {
   ModDB db;
   Source src{"Item", ""};
-  db.add(Stat::HP, ModType::Base, 100.0, src);
-  db.add(Stat::HP, ModType::Base, 200.0, src);
-  db.add(Stat::HP, ModType::Inc, 0.5, src);
-  db.add(Stat::HP, ModType::More, 2.0, src);
+  db.add(Stat::MaxHP, ModType::Base, 100.0, src);
+  db.add(Stat::MaxHP, ModType::Base, 200.0, src);
+  db.add(Stat::MaxHP, ModType::Inc, 0.5, src);
+  db.add(Stat::MaxHP, ModType::More, 2.0, src);
   // sum=300, inc=1.5, more=2.0 → 300*1.5*2.0=900
-  REQUIRE(db.getStat(Stat::HP) == Catch::Approx(900.0));
+  REQUIRE(db.getStat(Stat::MaxHP) == Catch::Approx(900.0));
 }
 ```
 
@@ -455,10 +455,10 @@ TEST_CASE("Champion getBaseStats with empty mod_db returns all zeros",
 TEST_CASE("Champion getBaseStats reads from mod_db", "[champion]") {
   Champion champ;
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
-  champ.mod_db.add(Stat::HP, ModType::Base, 500.0, Source{"Base", ""});
+  champ.mod_db.add(Stat::MaxHP, ModType::Base, 500.0, Source{"Base", ""});
   Stats base = champ.getBaseStats();
   REQUIRE(base[std::to_underlying(Stat::AD)] == Catch::Approx(50.0));
-  REQUIRE(base[std::to_underlying(Stat::HP)] == Catch::Approx(500.0));
+  REQUIRE(base[std::to_underlying(Stat::MaxHP)] == Catch::Approx(500.0));
   REQUIRE(base[std::to_underlying(Stat::AP)] == Catch::Approx(0.0));
 }
 
@@ -474,8 +474,8 @@ TEST_CASE("Champion getDeltaStats returns max abs element difference",
   Stats b{};
   a[std::to_underlying(Stat::AD)] = 50.0;
   b[std::to_underlying(Stat::AD)] = 55.0;
-  a[std::to_underlying(Stat::HP)] = 500.0;
-  b[std::to_underlying(Stat::HP)] = 450.0;
+  a[std::to_underlying(Stat::MaxHP)] = 500.0;
+  b[std::to_underlying(Stat::MaxHP)] = 450.0;
   // |55-50|=5, |450-500|=50 → max=50
   REQUIRE(Champion::getDeltaStats(a, b) == Catch::Approx(50.0));
 }

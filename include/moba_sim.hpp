@@ -17,7 +17,23 @@ using Type = double;
 Type post_mitigation_damage(const Type &raw_damage,
                             const Type &resistanse) noexcept;
 
-enum class Stat : std::uint8_t { HP, AP, AD, MS, AR, MR, CDR, Count };
+enum class Stat : std::uint8_t {
+  MaxHP,
+  CurrentHP,
+  Mana,
+  CurrentMana,
+  AP,
+  AD,
+  MS,
+  AR,
+  MR,
+  CDR,
+  ArmorPenFlat,
+  ArmorPenPct,
+  MagicPenFlat,
+  MagicPenPct,
+  Count
+};
 enum class ModType : std::uint8_t {
   Base, // 10 + 20 + 30
   Inc,  // 1.1 + 1.2 + 1.3
@@ -88,7 +104,8 @@ public:
 struct Champion {
   using Stats = std::array<Type, std::to_underlying(Stat::Count)>;
   // Construct a champion with base stats from an initializer list of
-  // (Stat, value) pairs. Example: Champion c{{Stat::HP, 1000}, {Stat::AD, 50}};
+  // (Stat, value) pairs. Example: Champion c{{Stat::MaxHP, 1000}, {Stat::AD,
+  // 50}};
   Champion(std::initializer_list<std::pair<Stat, Type>> stats);
   Champion() = default;
   // A Passive receives (base, final, time) and returns a bonus (delta) plus an
@@ -125,16 +142,6 @@ struct Champion {
     [[nodiscard]] PassiveEntry make(Passive p) {
       return PassiveEntry{.id = next_id_++, .passive = std::move(p)};
     }
-
-    // Wrap a passive that produces raw damage (as negative bonus[HP]) so its
-    // output goes through post_mitigation_damage based on `type` and the
-    // target's resistances. The inner passive controls the raw amount and its
-    // `alive` flag; the wrapper only applies mitigation.
-    // `target_final` is the target's stats at creation time (resistances read
-    // from it, not from live champion state).
-    [[nodiscard]] PassiveEntry makeDamage(Passive inner, TypeDamage type,
-                                          Type flat_pen, Type pct_pen,
-                                          const Stats &target_final);
   };
 
   ModDB mod_db;

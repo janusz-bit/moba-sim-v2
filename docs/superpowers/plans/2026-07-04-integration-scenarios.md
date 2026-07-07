@@ -184,13 +184,13 @@ TEST_CASE("Scenario: uneven weights reach non-base fixed point", "[scenario]") {
 TEST_CASE("Scenario: cross-stat dependency bonus from one stat to another",
           "[scenario]") {
   Champion champ;
-  champ.mod_db.add(Stat::HP, ModType::Base, 1000.0, Source{"Base", ""});
+  champ.mod_db.add(Stat::MaxHP, ModType::Base, 1000.0, Source{"Base", ""});
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
   champ.passives.push_back([](const Stats &, const Stats &final) {
     Stats bonus{};
     // AD bonus = 1% of final HP
     bonus[std::to_underlying(Stat::AD)] =
-        final[std::to_underlying(Stat::HP)] * 0.01;
+        final[std::to_underlying(Stat::MaxHP)] * 0.01;
     return bonus;
   });
   // HP unchanged (passive doesn't touch HP) → final[HP] = 1000
@@ -199,7 +199,7 @@ TEST_CASE("Scenario: cross-stat dependency bonus from one stat to another",
   // Iter 2: final = base + bonus(final) = {HP:1000, AD:50} + {AD:0.01*1000=10} = {HP:1000, AD:60}
   // delta = 0 → converges, final[AD] = 60
   Stats result = moba::evaluateChampion(champ, 0.0001);
-  REQUIRE(result[std::to_underlying(Stat::HP)] == Catch::Approx(1000.0));
+  REQUIRE(result[std::to_underlying(Stat::MaxHP)] == Catch::Approx(1000.0));
   REQUIRE(result[std::to_underlying(Stat::AD)] == Catch::Approx(60.0));
 }
 
