@@ -70,7 +70,7 @@ stats after the Base/Inc/More pipeline.
 A `Passive` is a `std::function` with signature:
 
 ```cpp
-PassiveResult(const Stats &base, const Stats &final, Type time) -> { Stats bonus; bool alive; }
+PassiveResult(const Stats &base, const Stats &final, const Type &time) -> { Stats bonus; bool alive; }
 ```
 
 - Receives `base` (stats from `mod_db`), `final` (current result), and `time`
@@ -139,7 +139,7 @@ Throws `ConvergenceError` if not converged within `max_iter`.
 ```cpp
 Champion c{{Stat::MaxHP, 1000}, {Stat::AD, 50}, {Stat::AR, 100}};
 Champion::PassiveFactory factory;
-c.addPassive(factory.make([](const Stats &base, const Stats &final, const Type &) {
+c.addPassive(factory.make([](const Stats &, const Stats &, const Type &) {
   Stats bonus{};
   bonus[std::to_underlying(Stat::AD)] = 10.0;
   return Champion::PassiveResult{bonus, true};  // permanent
@@ -150,8 +150,10 @@ Stats final = c.evaluateChampion();  // fixed-point of all passives
 **Time-based simulation:**
 
 ```cpp
+Stats base = c.getBaseStats();
+Stats final = base;
 for (double t = 0.0; t < 10.0; t += dt) {
-  Stats final = c.applyPassives(base, final, t);  // all passives, remove expired
+  final = c.applyPassives(base, final, t);  // all passives, remove expired
   // one-shot vanish after 1 step; temp expire when they return alive=false
 }
 ```
@@ -200,7 +202,7 @@ Champion::PassiveFactory factory;
 // 100 physical damage, 0 penetration → 50 post-mitigation
 Type dealt = moba::mitigated_damage(100.0, TypeDamage::Physical,
                                     target.getBaseStats());
-target.addPassive(factory.make([dealt](const Stats &, const Stats &, Type) {
+target.addPassive(factory.make([dealt](const Stats &, const Stats &, const Type &) {
   Stats bonus{};
   bonus[std::to_underlying(Stat::CurrentHP)] = -dealt;
   return Champion::PassiveResult{bonus, false};  // one-shot
