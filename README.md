@@ -188,30 +188,32 @@ c.addPassive({burn.id, make_burn(5.0, 5.0)});  // refresh: same id, new passive
 
 ## Damage as a passive
 
-Damage fits the passive model without extending the type system.
-`PassiveFactory::makeDamage` wraps a passive that produces raw damage (as
-negative `bonus[HP]`) and applies `post_mitigation_damage` based on the damage
-type and the target's resistances. The inner passive controls the raw amount
-and its `alive` flag (so it can scale with `base`/`final`/`time`, be one-shot,
-temp, etc.); the wrapper only applies mitigation.
+Damage fits the passive model without extending the type system: a passive
+returns negative `bonus[CurrentHP]` to reduce the target's HP. Use the
+`mitigated_damage` helper to apply penetration and resistance mitigation
+before turning raw damage into a passive bonus.
 
 ```cpp
+Champion target{{Stat::MaxHP, 1000}, {Stat::CurrentHP, 1000}, {Stat::AR, 100}};
 Champion::PassiveFactory factory;
-Champion::Passive inner = [](const Stats &, const Stats &, Type) {
+
+// 100 physical damage, 0 penetration → 50 post-mitigation
+Type dealt = moba::mitigated_damage(100.0, TypeDamage::Physical,
+                                    target.getBaseStats());
+target.addPassive(factory.make([dealt](const Stats &, const Stats &, Type) {
   Stats bonus{};
-  bonus[std::to_underlying(Stat::MaxHP)] = -100.0;
-  return Champion::PassiveResult{bonus, false};  // one-shot, 100 raw
-};
-Stats target_final = target.evaluateChampion();
-target.addPassive(factory.makeDamage(inner, TypeDamage::Physical,
-                                     10.0, 0.0, target_final));
-target.evaluateChampion();  // HP reduced by mitigated damage
+  bonus[std::to_underlying(Stat::CurrentHP)] = -dealt;
+  return Champion::PassiveResult{bonus, false};  // one-shot
+}));
+target.evaluateChampion();  // CurrentHP reduced by mitigated damage
 ```
 
-- **Type damage** (physical/magic/true): choose `AR`/`MR`/none internally.
-- **Penetration** (flat + %): reduce effective resistance before mitigation.
+- **Type damage** (physical/magic/true): `mitigated_damage` selects `AR`/`MR`
+  internally; true damage bypasses mitigation.
+- **Penetration** (flat + %): `mitigated_damage(raw, type, target, flat, pct)`
+  reduces effective resistance before mitigation.
 - **One-shot**: `alive=false` → removed after applying.
-- **Lifesteal/heal**: a passive returning positive `bonus[HP]`.
+- **Lifesteal/heal**: a passive returning positive `bonus[CurrentHP]`.
 - **DoT**: a temp passive that accumulates damage in captured state per tick.
 - **Armor shred**: a passive returning negative `bonus[AR]` (debuff).
 
