@@ -50,5 +50,35 @@
             catch2_3
           ]);
       };
+
+      packages.default = pkgs.stdenv.mkDerivation {
+        name = "moba-sim";
+        src = ../.;
+        nativeBuildInputs = [
+          pkgs.cmake
+          pkgs.ninja
+        ];
+        cmakeFlags = [
+          "-G Ninja"
+          "-DMOBA_SIM_BUILD_TESTS=OFF"
+        ];
+        doCheck = false;
+      };
+
+      checks.tests = pkgs.stdenv.mkDerivation {
+        name = "moba-sim-tests";
+        src = ../.;
+        nativeBuildInputs = [
+          pkgs.cmake
+          pkgs.ninja
+        ];
+        buildInputs = [ pkgs.catch2_3 ];
+        cmakeFlags = [ "-G Ninja" ];
+        doCheck = true;
+        checkPhase = ''
+          ctest --output-on-failure
+        '';
+        installPhase = "mkdir -p $out";
+      };
     };
 }

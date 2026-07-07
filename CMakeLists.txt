@@ -14,5 +14,8 @@ endif()
 
 add_subdirectory(src)
 
-enable_testing()
-add_subdirectory(tests)
+option(MOBA_SIM_BUILD_TESTS "Build tests" ON)
+if(MOBA_SIM_BUILD_TESTS)
+  enable_testing()
+  add_subdirectory(tests)
+endif()
