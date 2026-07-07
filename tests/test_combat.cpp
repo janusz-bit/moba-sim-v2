@@ -16,19 +16,6 @@ Champion::PassiveFactory &factory() {
   static Champion::PassiveFactory f;
   return f;
 }
-
-// Compute mitigated damage for a given type and attacker's penetration stats
-// against the target's resistances. True damage bypasses mitigation.
-Type mitigated(Type raw, TypeDamage type, const Stats &target, Type flat_pen,
-               Type pct_pen) {
-  if (type == TypeDamage::True) {
-    return raw;
-  }
-  const Stat resist_stat = (type == TypeDamage::Physical) ? Stat::AR : Stat::MR;
-  Type res = target[std::to_underlying(resist_stat)];
-  res = (res - flat_pen) * (1.0 - pct_pen);
-  return moba::post_mitigation_damage(raw, res);
-}
 } // namespace
 
 TEST_CASE("Combat: physical damage reduced by armor", "[combat]") {
@@ -39,7 +26,11 @@ TEST_CASE("Combat: physical damage reduced by armor", "[combat]") {
                              {Stat::MR, 50}};
   Stats target_base = target.getBaseStats();
   // 100 physical vs 100 armor → 50 post-mitigation
-  Type dealt = mitigated(100.0, TypeDamage::Physical, target_base, 0.0, 0.0);
+  Type dealt = moba::mitigated_damage(100.0,
+                                      TypeDamage::Physical,
+                                      target_base,
+                                      0.0,
+                                      0.0);
   target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
     Stats bonus{};
     bonus[std::to_underlying(Stat::CurrentHP)] = -dealt;
@@ -57,7 +48,8 @@ TEST_CASE("Combat: magic damage reduced by MR", "[combat]") {
                              {Stat::MR, 50}};
   Stats target_base = target.getBaseStats();
   // 100 magic vs 50 MR → 100 * 100/150 ≈ 66.667
-  Type dealt = mitigated(100.0, TypeDamage::Magic, target_base, 0.0, 0.0);
+  Type dealt =
+      moba::mitigated_damage(100.0, TypeDamage::Magic, target_base, 0.0, 0.0);
   target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
     Stats bonus{};
     bonus[std::to_underlying(Stat::CurrentHP)] = -dealt;
@@ -76,7 +68,8 @@ TEST_CASE("Combat: true damage ignores resistances", "[combat]") {
                              {Stat::MR, 1000}};
   Stats target_base = target.getBaseStats();
   // 100 true damage → 100 HP loss regardless of AR/MR
-  Type dealt = mitigated(100.0, TypeDamage::True, target_base, 0.0, 0.0);
+  Type dealt =
+      moba::mitigated_damage(100.0, TypeDamage::True, target_base, 0.0, 0.0);
   target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
     Stats bonus{};
     bonus[std::to_underlying(Stat::CurrentHP)] = -dealt;
@@ -102,8 +95,11 @@ TEST_CASE("Combat: flat armor penetration as stat", "[combat]") {
   Stats target_base = target.getBaseStats();
   // 100 physical, 30 flat pen → effective armor = 70 → 100*100/170 ≈ 58.82
   Type flat_pen = attacker_base[std::to_underlying(Stat::ArmorPenFlat)];
-  Type dealt =
-      mitigated(100.0, TypeDamage::Physical, target_base, flat_pen, 0.0);
+  Type dealt = moba::mitigated_damage(100.0,
+                                      TypeDamage::Physical,
+                                      target_base,
+                                      flat_pen,
+                                      0.0);
   target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
     Stats bonus{};
     bonus[std::to_underlying(Stat::CurrentHP)] = -dealt;
@@ -130,8 +126,11 @@ TEST_CASE("Combat: percentage armor penetration as stat", "[combat]") {
   Stats target_base = target.getBaseStats();
   // 100 physical, 30% pen → effective armor = 100*0.7 = 70 → 58.82
   Type pct_pen = attacker_base[std::to_underlying(Stat::ArmorPenPct)];
-  Type dealt =
-      mitigated(100.0, TypeDamage::Physical, target_base, 0.0, pct_pen);
+  Type dealt = moba::mitigated_damage(100.0,
+                                      TypeDamage::Physical,
+                                      target_base,
+                                      0.0,
+                                      pct_pen);
   target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
     Stats bonus{};
     bonus[std::to_underlying(Stat::CurrentHP)] = -dealt;
@@ -161,8 +160,11 @@ TEST_CASE("Combat: flat and percentage penetration stack", "[combat]") {
   // ≈ 67.11
   Type flat_pen = attacker_base[std::to_underlying(Stat::ArmorPenFlat)];
   Type pct_pen = attacker_base[std::to_underlying(Stat::ArmorPenPct)];
-  Type dealt =
-      mitigated(100.0, TypeDamage::Physical, target_base, flat_pen, pct_pen);
+  Type dealt = moba::mitigated_damage(100.0,
+                                      TypeDamage::Physical,
+                                      target_base,
+                                      flat_pen,
+                                      pct_pen);
   target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
     Stats bonus{};
     bonus[std::to_underlying(Stat::CurrentHP)] = -dealt;
@@ -188,11 +190,12 @@ TEST_CASE("Combat: attacker deals damage to target via passive", "[combat]") {
   Stats attacker_base = attacker.getBaseStats();
   Stats target_base = target.getBaseStats();
   // attacker auto-attacks: 60 physical vs target's 100 armor → 30 damage
-  Type dealt = mitigated(attacker_base[std::to_underlying(Stat::AD)],
-                         TypeDamage::Physical,
-                         target_base,
-                         0.0,
-                         0.0);
+  Type dealt =
+      moba::mitigated_damage(attacker_base[std::to_underlying(Stat::AD)],
+                             TypeDamage::Physical,
+                             target_base,
+                             0.0,
+                             0.0);
   target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
     Stats bonus{};
     bonus[std::to_underlying(Stat::CurrentHP)] = -dealt;
@@ -211,7 +214,11 @@ TEST_CASE("Combat: multiple hits in one evaluation", "[combat]") {
   Stats target_base = target.getBaseStats();
   // 3 separate one-shot damage passives: 100 physical each → 50 each → 150
   // total
-  Type dealt = mitigated(100.0, TypeDamage::Physical, target_base, 0.0, 0.0);
+  Type dealt = moba::mitigated_damage(100.0,
+                                      TypeDamage::Physical,
+                                      target_base,
+                                      0.0,
+                                      0.0);
   for (int i = 0; i < 3; ++i) {
     target.addPassive(
         factory().make([dealt](const Stats &, const Stats &, Type) {
@@ -233,9 +240,15 @@ TEST_CASE("Combat: mixed damage types in one evaluation", "[combat]") {
                              {Stat::MR, 50}};
   Stats target_base = target.getBaseStats();
   // 100 physical (→50), 100 magic (→66.67), 100 true (→100) = 216.67 total
-  Type phys = mitigated(100.0, TypeDamage::Physical, target_base, 0.0, 0.0);
-  Type magic = mitigated(100.0, TypeDamage::Magic, target_base, 0.0, 0.0);
-  Type true_d = mitigated(100.0, TypeDamage::True, target_base, 0.0, 0.0);
+  Type phys = moba::mitigated_damage(100.0,
+                                     TypeDamage::Physical,
+                                     target_base,
+                                     0.0,
+                                     0.0);
+  Type magic =
+      moba::mitigated_damage(100.0, TypeDamage::Magic, target_base, 0.0, 0.0);
+  Type true_d =
+      moba::mitigated_damage(100.0, TypeDamage::True, target_base, 0.0, 0.0);
   target.addPassive(factory().make([phys](const Stats &, const Stats &, Type) {
     Stats bonus{};
     bonus[std::to_underlying(Stat::CurrentHP)] = -phys;
@@ -272,11 +285,12 @@ TEST_CASE("Combat: lifesteal heals attacker for fraction of damage",
 
   Stats attacker_base = attacker.getBaseStats();
   Stats target_base = target.getBaseStats();
-  Type dealt = mitigated(attacker_base[std::to_underlying(Stat::AD)],
-                         TypeDamage::Physical,
-                         target_base,
-                         0.0,
-                         0.0);
+  Type dealt =
+      moba::mitigated_damage(attacker_base[std::to_underlying(Stat::AD)],
+                             TypeDamage::Physical,
+                             target_base,
+                             0.0,
+                             0.0);
 
   // attacker deals damage to target
   target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
@@ -305,7 +319,11 @@ TEST_CASE("Combat: damage passive is one-shot and consumed", "[combat]") {
                              {Stat::AR, 100},
                              {Stat::MR, 50}};
   Stats target_base = target.getBaseStats();
-  Type dealt = mitigated(100.0, TypeDamage::Physical, target_base, 0.0, 0.0);
+  Type dealt = moba::mitigated_damage(100.0,
+                                      TypeDamage::Physical,
+                                      target_base,
+                                      0.0,
+                                      0.0);
   target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
     Stats bonus{};
     bonus[std::to_underlying(Stat::CurrentHP)] = -dealt;
@@ -327,7 +345,11 @@ TEST_CASE("Combat: negative armor amplifies damage", "[combat]") {
                              {Stat::MR, 50}};
   Stats target_base = target.getBaseStats();
   // 100 physical vs -50 armor → 100 * (2 - 100/150) ≈ 133.33
-  Type dealt = mitigated(100.0, TypeDamage::Physical, target_base, 0.0, 0.0);
+  Type dealt = moba::mitigated_damage(100.0,
+                                      TypeDamage::Physical,
+                                      target_base,
+                                      0.0,
+                                      0.0);
   target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
     Stats bonus{};
     bonus[std::to_underlying(Stat::CurrentHP)] = -dealt;
@@ -346,7 +368,8 @@ TEST_CASE("Combat: target dies when damage exceeds HP", "[combat]") {
                              {Stat::MR, 50}};
   Stats target_base = target.getBaseStats();
   // 1000 true damage → HP goes negative
-  Type dealt = mitigated(1000.0, TypeDamage::True, target_base, 0.0, 0.0);
+  Type dealt =
+      moba::mitigated_damage(1000.0, TypeDamage::True, target_base, 0.0, 0.0);
   target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
     Stats bonus{};
     bonus[std::to_underlying(Stat::CurrentHP)] = -dealt;
@@ -415,22 +438,22 @@ TEST_CASE("Combat: two champions trade damage", "[combat]") {
   Stats b_base = b.getBaseStats();
 
   // a hits b: 60 physical vs 80 armor → 60*100/180 = 33.33
-  Type dealt_to_b = mitigated(a_base[std::to_underlying(Stat::AD)],
-                              TypeDamage::Physical,
-                              b_base,
-                              0.0,
-                              0.0);
+  Type dealt_to_b = moba::mitigated_damage(a_base[std::to_underlying(Stat::AD)],
+                                           TypeDamage::Physical,
+                                           b_base,
+                                           0.0,
+                                           0.0);
   b.addPassive(factory().make([dealt_to_b](const Stats &, const Stats &, Type) {
     Stats bonus{};
     bonus[std::to_underlying(Stat::CurrentHP)] = -dealt_to_b;
     return Champion::PassiveResult{bonus, false};
   }));
   // b hits a: 40 physical vs 50 armor → 40*100/150 = 26.67
-  Type dealt_to_a = mitigated(b_base[std::to_underlying(Stat::AD)],
-                              TypeDamage::Physical,
-                              a_base,
-                              0.0,
-                              0.0);
+  Type dealt_to_a = moba::mitigated_damage(b_base[std::to_underlying(Stat::AD)],
+                                           TypeDamage::Physical,
+                                           a_base,
+                                           0.0,
+                                           0.0);
   a.addPassive(factory().make([dealt_to_a](const Stats &, const Stats &, Type) {
     Stats bonus{};
     bonus[std::to_underlying(Stat::CurrentHP)] = -dealt_to_a;
@@ -464,7 +487,8 @@ TEST_CASE("Combat: armor shred debuff then damage", "[combat]") {
   REQUIRE(shredded[std::to_underlying(Stat::AR)] == Catch::Approx(70.0));
 
   // Now apply damage with the shredded armor
-  Type dealt = mitigated(100.0, TypeDamage::Physical, shredded, 0.0, 0.0);
+  Type dealt =
+      moba::mitigated_damage(100.0, TypeDamage::Physical, shredded, 0.0, 0.0);
   target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
     Stats bonus{};
     bonus[std::to_underlying(Stat::CurrentHP)] = -dealt;

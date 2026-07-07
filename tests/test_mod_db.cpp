@@ -340,3 +340,37 @@ TEST_CASE("ModDB add then remove leaves empty", "[mod_db]") {
   REQUIRE(db.get_mods().empty());
   REQUIRE(db.getStat(Stat::AD) == Catch::Approx(0.0));
 }
+
+// --- Source ctor hardening tests ---
+
+TEST_CASE("Source default-constructed is empty", "[mod_db]") {
+  Source s;
+  REQUIRE(s.name.empty());
+  REQUIRE(s.description.empty());
+}
+
+TEST_CASE("Source initializer_list with two elements fills both fields",
+          "[mod_db]") {
+  Source s{"Item", "sword"};
+  REQUIRE(s.name == "Item");
+  REQUIRE(s.description == "sword");
+}
+
+TEST_CASE("Source initializer_list with one element leaves description empty",
+          "[mod_db]") {
+  Source s{"Item"};
+  REQUIRE(s.name == "Item");
+  REQUIRE(s.description.empty());
+}
+
+TEST_CASE("Source initializer_list empty yields empty fields", "[mod_db]") {
+  Source s{};
+  REQUIRE(s.name.empty());
+  REQUIRE(s.description.empty());
+}
+
+TEST_CASE("Source two-arg ctor works without initializer_list", "[mod_db]") {
+  Source s("Rune", "fire");
+  REQUIRE(s.name == "Rune");
+  REQUIRE(s.description == "fire");
+}
