@@ -24,13 +24,26 @@ Tests use [Catch2 v3](https://github.com/catchorg/Catch2), wired through CTest.
 ctest --test-dir build
 ```
 
+## Nix
+
+| Command              | Description                                        |
+| -------------------- | -------------------------------------------------- |
+| `nix develop`        | Dev shell with toolchain + pre-commit hooks        |
+| `nix build`          | Build the `moba_sim` package (headers + static lib) |
+| `nix flake check`    | Run pre-commit hooks + build & run tests            |
+| `pre-commit run -a`  | Run linters/formatters manually (inside dev shell)  |
+
+The package installs `include/moba_sim.hpp` and `lib/libmoba_sim.a`. Tests are
+gated behind the `MOBA_SIM_BUILD_TESTS` CMake option (ON by default, OFF when
+built as a package).
+
 ## Project layout
 
 ```
 include/moba_sim.hpp   Public API: Stat, ModType, ModDB, Champion, passives
 src/moba_sim.cpp       Implementation
 tests/                 Catch2 test suite (one file per component)
-nix/default.nix        Flake module: devShell, pre-commit hooks
+nix/default.nix        Flake module: devShell, pre-commit hooks, package, checks
 ```
 
 ## Stat model
@@ -173,3 +186,34 @@ auto burn = factory.make(make_burn(0.0, 3.0));
 c.addPassive(burn);                       // insert
 c.addPassive({burn.id, make_burn(5.0, 5.0)});  // refresh: same id, new passive
 ```
+
+## Damage as a passive
+
+Damage fits the passive model without extending the type system. A one-shot
+passive reads the target's final stats (for resistances), computes mitigated
+damage via `post_mitigation_damage`, and returns a negative `bonus[HP]`:
+
+```cpp
+auto damage = factory.make(
+    [raw = 100.0, type = TypeDamage::Physical,
+     flat_pen = 10.0, pct_pen = 0.0,
+     target_final](const Stats &, const Stats &, Type) {
+      const Stat resist = (type == TypeDamage::Physical) ? Stat::AR : Stat::MR;
+      Type res = target_final[std::to_underlying(resist)];
+      res = (res - flat_pen) * (1.0 - pct_pen);  // penetration
+      Stats bonus{};
+      bonus[std::to_underlying(Stat::HP)] = -post_mitigation_damage(raw, res);
+      return Champion::PassiveResult{bonus, false};  // one-shot
+    });
+target.addPassive(damage);
+```
+
+- **Type damage** (physical/magic/true): choose `AR`/`MR`/none in the closure.
+- **Penetration** (flat + %): reduce effective resistance before mitigation.
+- **One-shot**: `alive=false` → removed after applying.
+- **Lifesteal/heal**: a passive returning positive `bonus[HP]`.
+- **DoT**: a temp passive that accumulates damage in captured state per tick.
+- **Armor shred**: a passive returning negative `bonus[AR]` (debuff).
+
+See `tests/test_combat.cpp` for working examples (trades, penetration, DoT,
+lifesteal, shred, death).
