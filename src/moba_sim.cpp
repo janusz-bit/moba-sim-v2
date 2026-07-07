@@ -61,24 +61,27 @@ inline std::string statToString(Stat stat) {
 }
 
 Champion::PassiveEntry
-Champion::PassiveFactory::makeDamage(Type raw, TypeDamage type, Type flat_pen,
-                                     Type pct_pen, const Stats &target_final) {
-  return make(
-      [raw, type, flat_pen, pct_pen, target_final](const Stats &,
-                                                   const Stats &,
-                                                   Type) -> PassiveResult {
-        Stats bonus{};
-        if (type == TypeDamage::True) {
-          bonus[std::to_underlying(Stat::HP)] = -raw;
-          return {.bonus = bonus, .alive = false};
-        }
-        const Stat resist_stat =
-            (type == TypeDamage::Physical) ? Stat::AR : Stat::MR;
-        Type res = target_final[std::to_underlying(resist_stat)];
-        res = (res - flat_pen) * (1.0 - pct_pen);
-        bonus[std::to_underlying(Stat::HP)] = -post_mitigation_damage(raw, res);
-        return {.bonus = bonus, .alive = false};
-      });
+Champion::PassiveFactory::makeDamage(Passive raw, TypeDamage type,
+                                     Type flat_pen, Type pct_pen,
+                                     const Stats &target_final) {
+  return make([raw = std::move(raw), type, flat_pen, pct_pen, target_final](
+                  const Stats &base,
+                  const Stats &final,
+                  Type time) -> PassiveResult {
+    auto result = raw(base, final, time);
+    const Type raw_amount = -result.bonus[std::to_underlying(Stat::HP)];
+    if (type == TypeDamage::True) {
+      result.bonus[std::to_underlying(Stat::HP)] = -raw_amount;
+      return result;
+    }
+    const Stat resist_stat =
+        (type == TypeDamage::Physical) ? Stat::AR : Stat::MR;
+    Type res = target_final[std::to_underlying(resist_stat)];
+    res = (res - flat_pen) * (1.0 - pct_pen);
+    result.bonus[std::to_underlying(Stat::HP)] =
+        -post_mitigation_damage(raw_amount, res);
+    return result;
+  });
 }
 
 void ModDB::add(const Stat &stat, const ModType &type, const Type &value,

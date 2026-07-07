@@ -126,10 +126,13 @@ struct Champion {
       return PassiveEntry{.id = next_id_++, .passive = std::move(p)};
     }
 
-    // Build a one-shot damage passive that reduces target HP by raw*mitigation.
-    // `target_final` is the target's stats at the time the passive is created
-    // (resistances are read from it, not from live champion state).
-    [[nodiscard]] PassiveEntry makeDamage(Type raw, TypeDamage type,
+    // Wrap a passive that produces raw damage (as negative bonus[HP]) so its
+    // output goes through post-mitigation_damage based on `type` and the
+    // target's resistances. The inner passive controls the raw amount and its
+    // `alive` flag; the wrapper only applies mitigation.
+    // `target_final` is the target's stats at creation time (resistances read
+    // from it, not from live champion state).
+    [[nodiscard]] PassiveEntry makeDamage(Passive raw, TypeDamage type,
                                           Type flat_pen, Type pct_pen,
                                           const Stats &target_final);
   };

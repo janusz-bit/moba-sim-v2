@@ -189,14 +189,22 @@ c.addPassive({burn.id, make_burn(5.0, 5.0)});  // refresh: same id, new passive
 ## Damage as a passive
 
 Damage fits the passive model without extending the type system.
-`PassiveFactory::makeDamage` builds a one-shot passive that reads the target's
-final stats (for resistances), computes mitigated damage via
-`post_mitigation_damage`, and returns a negative `bonus[HP]`:
+`PassiveFactory::makeDamage` wraps a passive that produces raw damage (as
+negative `bonus[HP]`) and applies `post_mitigation_damage` based on the damage
+type and the target's resistances. The inner passive controls the raw amount
+and its `alive` flag (so it can scale with `base`/`final`/`time`, be one-shot,
+temp, etc.); the wrapper only applies mitigation.
 
 ```cpp
+Champion::PassiveFactory factory;
+Champion::Passive raw = [](const Stats &, const Stats &, Type) {
+  Stats bonus{};
+  bonus[std::to_underlying(Stat::HP)] = -100.0;
+  return Champion::PassiveResult{bonus, false};  // one-shot, 100 raw
+};
 Stats target_final = target.evaluateChampion();
-target.addPassive(factory.makeDamage(100.0, TypeDamage::Physical,
-                                      10.0, 0.0, target_final));
+target.addPassive(factory.makeDamage(raw, TypeDamage::Physical,
+                                     10.0, 0.0, target_final));
 target.evaluateChampion();  // HP reduced by mitigated damage
 ```
 
