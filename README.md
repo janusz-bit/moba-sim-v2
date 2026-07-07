@@ -137,8 +137,7 @@ Throws `ConvergenceError` if not converged within `max_iter`.
 **Static champion** (no time):
 
 ```cpp
-Champion c;
-c.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
+Champion c{{Stat::HP, 1000}, {Stat::AD, 50}, {Stat::AR, 100}};
 Champion::PassiveFactory factory;
 c.addPassive(factory.make([](const Stats &base, const Stats &final, const Type &) {
   Stats bonus{};
@@ -189,26 +188,19 @@ c.addPassive({burn.id, make_burn(5.0, 5.0)});  // refresh: same id, new passive
 
 ## Damage as a passive
 
-Damage fits the passive model without extending the type system. A one-shot
-passive reads the target's final stats (for resistances), computes mitigated
-damage via `post_mitigation_damage`, and returns a negative `bonus[HP]`:
+Damage fits the passive model without extending the type system.
+`PassiveFactory::makeDamage` builds a one-shot passive that reads the target's
+final stats (for resistances), computes mitigated damage via
+`post_mitigation_damage`, and returns a negative `bonus[HP]`:
 
 ```cpp
-auto damage = factory.make(
-    [raw = 100.0, type = TypeDamage::Physical,
-     flat_pen = 10.0, pct_pen = 0.0,
-     target_final](const Stats &, const Stats &, Type) {
-      const Stat resist = (type == TypeDamage::Physical) ? Stat::AR : Stat::MR;
-      Type res = target_final[std::to_underlying(resist)];
-      res = (res - flat_pen) * (1.0 - pct_pen);  // penetration
-      Stats bonus{};
-      bonus[std::to_underlying(Stat::HP)] = -post_mitigation_damage(raw, res);
-      return Champion::PassiveResult{bonus, false};  // one-shot
-    });
-target.addPassive(damage);
+Stats target_final = target.evaluateChampion();
+target.addPassive(factory.makeDamage(100.0, TypeDamage::Physical,
+                                      10.0, 0.0, target_final));
+target.evaluateChampion();  // HP reduced by mitigated damage
 ```
 
-- **Type damage** (physical/magic/true): choose `AR`/`MR`/none in the closure.
+- **Type damage** (physical/magic/true): choose `AR`/`MR`/none internally.
 - **Penetration** (flat + %): reduce effective resistance before mitigation.
 - **One-shot**: `alive=false` → removed after applying.
 - **Lifesteal/heal**: a passive returning positive `bonus[HP]`.

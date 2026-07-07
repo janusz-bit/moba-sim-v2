@@ -87,6 +87,10 @@ public:
 
 struct Champion {
   using Stats = std::array<Type, std::to_underlying(Stat::Count)>;
+  // Construct a champion with base stats from an initializer list of
+  // (Stat, value) pairs. Example: Champion c{{Stat::HP, 1000}, {Stat::AD, 50}};
+  Champion(std::initializer_list<std::pair<Stat, Type>> stats);
+  Champion() = default;
   // A Passive receives (base, final, time) and returns a bonus (delta) plus an
   // `alive` flag. `time` is the absolute simulation time (starts at 0, only
   // increases). The passive is the sole authority on its lifetime:
@@ -121,6 +125,13 @@ struct Champion {
     [[nodiscard]] PassiveEntry make(Passive p) {
       return PassiveEntry{.id = next_id_++, .passive = std::move(p)};
     }
+
+    // Build a one-shot damage passive that reduces target HP by raw*mitigation.
+    // `target_final` is the target's stats at the time the passive is created
+    // (resistances are read from it, not from live champion state).
+    [[nodiscard]] PassiveEntry makeDamage(Type raw, TypeDamage type,
+                                          Type flat_pen, Type pct_pen,
+                                          const Stats &target_final);
   };
 
   ModDB mod_db;
