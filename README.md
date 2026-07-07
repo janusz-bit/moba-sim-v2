@@ -197,13 +197,13 @@ temp, etc.); the wrapper only applies mitigation.
 
 ```cpp
 Champion::PassiveFactory factory;
-Champion::Passive raw = [](const Stats &, const Stats &, Type) {
+Champion::Passive inner = [](const Stats &, const Stats &, Type) {
   Stats bonus{};
   bonus[std::to_underlying(Stat::HP)] = -100.0;
   return Champion::PassiveResult{bonus, false};  // one-shot, 100 raw
 };
 Stats target_final = target.evaluateChampion();
-target.addPassive(factory.makeDamage(raw, TypeDamage::Physical,
+target.addPassive(factory.makeDamage(inner, TypeDamage::Physical,
                                      10.0, 0.0, target_final));
 target.evaluateChampion();  // HP reduced by mitigated damage
 ```

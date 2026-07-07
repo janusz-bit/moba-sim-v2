@@ -127,12 +127,12 @@ struct Champion {
     }
 
     // Wrap a passive that produces raw damage (as negative bonus[HP]) so its
-    // output goes through post-mitigation_damage based on `type` and the
+    // output goes through post_mitigation_damage based on `type` and the
     // target's resistances. The inner passive controls the raw amount and its
     // `alive` flag; the wrapper only applies mitigation.
     // `target_final` is the target's stats at creation time (resistances read
     // from it, not from live champion state).
-    [[nodiscard]] PassiveEntry makeDamage(Passive raw, TypeDamage type,
+    [[nodiscard]] PassiveEntry makeDamage(Passive inner, TypeDamage type,
                                           Type flat_pen, Type pct_pen,
                                           const Stats &target_final);
   };

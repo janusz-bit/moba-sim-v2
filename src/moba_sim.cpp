@@ -61,14 +61,14 @@ inline std::string statToString(Stat stat) {
 }
 
 Champion::PassiveEntry
-Champion::PassiveFactory::makeDamage(Passive raw, TypeDamage type,
+Champion::PassiveFactory::makeDamage(Passive inner, TypeDamage type,
                                      Type flat_pen, Type pct_pen,
                                      const Stats &target_final) {
-  return make([raw = std::move(raw), type, flat_pen, pct_pen, target_final](
+  return make([inner = std::move(inner), type, flat_pen, pct_pen, target_final](
                   const Stats &base,
                   const Stats &final,
                   Type time) -> PassiveResult {
-    auto result = raw(base, final, time);
+    auto result = inner(base, final, time);
     const Type raw_amount = -result.bonus[std::to_underlying(Stat::HP)];
     if (type == TypeDamage::True) {
       result.bonus[std::to_underlying(Stat::HP)] = -raw_amount;
