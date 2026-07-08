@@ -1,7 +1,6 @@
 #include "moba_sim.hpp"
 #include <algorithm>
 #include <cmath>
-#include <stdexcept>
 namespace moba {
 
 namespace {
