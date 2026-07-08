@@ -5,29 +5,35 @@
 namespace moba {
 
 namespace {
-[[nodiscard]] Champion::Stats addStats(const Champion::Stats &a,
-                                       const Champion::Stats &b) {
+// Computes all stats from a ModDB as a Stats array (full Base/Inc/More pipeline
+// per stat).
+[[nodiscard]] Champion::Stats statsFromModDB(const ModDB &db) {
   Champion::Stats out{};
   for (std::size_t i = 0; i < std::to_underlying(Stat::Count); ++i) {
-    out[i] = a[i] + b[i];
+    out[i] = db.getStat(static_cast<Stat>(i));
   }
   return out;
 }
 
-// Applies all passives in a single step without removing any. Returns the
-// resulting stats and the `alive` flag of each passive (aligned with passives).
+// Applies all passives in a single step without removing any. Folds passive
+// mods into a copy of mod_db, then runs the full Base/Inc/More pipeline.
+// Returns the resulting stats and the `alive` flag of each passive (aligned
+// with passives by index).
 [[nodiscard]] std::pair<Champion::Stats, std::vector<bool>>
-applyPassivesNoRemove(const std::vector<Champion::PassiveEntry> &passives,
+applyPassivesNoRemove(const ModDB &mod_db,
+                      const std::vector<Champion::PassiveEntry> &passives,
                       const Champion::Stats &base, const Champion::Stats &final,
                       const Type &time) {
-  Champion::Stats out = base;
+  ModDB working = mod_db;
   std::vector<bool> alive_flags;
   for (const auto &entry : passives) {
-    auto [bonus, alive] = entry.passive(base, final, time);
-    out = addStats(out, bonus);
+    auto [mods, alive] = entry.passive(base, final, time);
+    for (const auto &m : mods) {
+      working.add(m.stat, m.type, m.value, m.source);
+    }
     alive_flags.push_back(alive);
   }
-  return {out, std::move(alive_flags)};
+  return {statsFromModDB(working), std::move(alive_flags)};
 }
 } // namespace
 
@@ -124,11 +130,7 @@ void ModDB::replace(const Stat &stat, const ModType &type, const Type &value,
 }
 
 Champion::Stats Champion::getBaseStats() const {
-  Stats stats{};
-  for (std::size_t i = 0; i < std::to_underlying(Stat::Count); ++i) {
-    stats[i] = mod_db.getStat(static_cast<Stat>(i));
-  }
-  return stats;
+  return statsFromModDB(mod_db);
 }
 
 void Champion::addPassive(PassiveEntry entry) {
@@ -143,17 +145,19 @@ void Champion::addPassive(PassiveEntry entry) {
 
 Champion::Stats Champion::applyPassives(const Stats &base, const Stats &final,
                                         const Type &time) {
-  Stats bonus{};
+  ModDB working = mod_db;
   for (auto it = passives.begin(); it != passives.end();) {
-    auto [b, alive] = it->passive(base, final, time);
-    bonus = addStats(bonus, b);
+    auto [mods, alive] = it->passive(base, final, time);
+    for (const auto &m : mods) {
+      working.add(m.stat, m.type, m.value, m.source);
+    }
     if (alive) {
       ++it;
     } else {
       it = passives.erase(it);
     }
   }
-  return addStats(base, bonus);
+  return statsFromModDB(working);
 }
 
 Type Champion::getDeltaStats(const Stats &stats1, const Stats &stats2) {
@@ -174,7 +178,7 @@ Champion::Stats Champion::evaluateChampion(Type eps, std::size_t max_iter,
   std::vector<bool> alive_flags;
   do {
     prev = final;
-    auto [f, flags] = applyPassivesNoRemove(passives, base, prev, time);
+    auto [f, flags] = applyPassivesNoRemove(mod_db, passives, base, prev, time);
     final = f;
     alive_flags = std::move(flags);
     ++iter;

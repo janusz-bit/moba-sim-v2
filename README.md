@@ -70,12 +70,17 @@ stats after the Base/Inc/More pipeline.
 A `Passive` is a `std::function` with signature:
 
 ```cpp
-PassiveResult(const Stats &base, const Stats &final, const Type &time) -> { Stats bonus; bool alive; }
+PassiveResult(const Stats &base, const Stats &final, const Type &time)
+  -> { std::vector<Modifier> mods; bool alive; }
 ```
 
 - Receives `base` (stats from `mod_db`), `final` (current result), and `time`
   (absolute simulation time, starts at 0 and only increases).
-- Returns a `bonus` (delta added to `final`) and an `alive` flag.
+- Returns a list of typed `Modifier`s (each with `Stat`, `ModType`
+  Base/Inc/More, `value`, `source`) and an `alive` flag.
+- Passive mods are folded into a copy of `mod_db` and run through the full
+  Base/Inc/More pipeline, so a passive can express additive bonuses (Base),
+  percent increases (Inc), or multiplicative multipliers (More).
 
 A passive **is the sole authority on its lifetime** via the `alive` flag:
 
@@ -88,8 +93,8 @@ All passives live in a single `passives` queue of `PassiveEntry` (id + passive).
 Use `Champion::PassiveFactory::make()` to create entries with unique ids, and
 `Champion::addPassive()` to insert — inserting an entry whose id already exists
 **replaces** the existing passive (refresh), otherwise a new entry is appended.
-The framework treats passives uniformly: call, sum the bonus, remove if
-`alive=false`. A passive may capture a `start_time` and `duration`, reset
+The framework treats passives uniformly: call, fold mods into `mod_db`, remove
+if `alive=false`. A passive may capture a `start_time` and `duration`, reset
 itself, or change its effect — the framework knows nothing about
 time/counters/handles; the passive is a black box with access to `time`.
 
@@ -107,25 +112,27 @@ champ.addPassive({e.id, newPassive});  // replace existing
 
 Applies all passives in a single step:
 
-1. For each passive: call it, sum the bonus.
-2. If `alive=false`, erase it (using the iterator returned by `erase`); the
-   bonus is still applied for this step.
+1. For each passive: call it, fold its mods into a copy of `mod_db`.
+2. If `alive=false`, erase it; the mods are still applied for this step.
+3. Run the full Base/Inc/More pipeline on the resulting `mod_db`.
 
-Returns `base + sum(bonuses)`. Mutates `passives` (removes expired/one-shot).
+Returns the stats after the pipeline. Mutates `passives` (removes
+expired/one-shot). The `base` parameter is passed to passives as informational
+input only — the result is computed from `mod_db + passive mods`.
 
-## `evaluateChampion(eps, max_iter)` — fixed-point of all passives
+## `evaluateChampion(eps, max_iter, time)` — fixed-point of all passives
 
 Iterates **all passives** to resolve fixed-point interactions, but **does not
-remove** any during iteration — passives are applied repeatedly with
-`time = 0.0` (the fixed-point is immediate, not a simulation step). After
-convergence, passives that returned `alive=false` on the final iteration are
-removed; those with `alive=true` stay.
+remove** any during iteration — passives are applied repeatedly with `time`
+(the fixed-point is immediate, not a simulation step). After convergence,
+passives that returned `alive=false` on the final iteration are removed; those
+with `alive=true` stay.
 
 ```
-final = base
+final = getBaseStats()
 repeat:
   prev = final
-  final = base + sum(passive(base, prev, 0.0))   // no removal during iteration
+  final = pipeline(mod_db + sum(passive(base, prev, time)))   // no removal
 until delta(final, prev) <= eps  or  iter >= max_iter
 then: remove passives where alive=false (from the final iteration)
 ```
@@ -140,9 +147,8 @@ Throws `ConvergenceError` if not converged within `max_iter`.
 Champion c{{Stat::MaxHP, 1000}, {Stat::AD, 50}, {Stat::AR, 100}};
 Champion::PassiveFactory factory;
 c.addPassive(factory.make([](const Stats &, const Stats &, const Type &) {
-  Stats bonus{};
-  bonus[std::to_underlying(Stat::AD)] = 10.0;
-  return Champion::PassiveResult{bonus, true};  // permanent
+  return Champion::PassiveResult{
+      {{Stat::AD, ModType::Base, 10.0, {}}}, true};  // permanent +10 AD
 }));
 Stats final = c.evaluateChampion();  // fixed-point of all passives
 ```
@@ -163,9 +169,8 @@ for (double t = 0.0; t < 10.0; t += dt) {
 ```cpp
 c.addPassive(factory.make(
     [start = 2.0, duration = 3.0](const Stats &, const Stats &, const Type &time) {
-      Stats bonus{};
-      bonus[std::to_underlying(Stat::AD)] = 10.0;
-      return Champion::PassiveResult{bonus, time - start < duration};  // alive until t=5.0
+      return Champion::PassiveResult{
+          {{Stat::AD, ModType::Base, 10.0, {}}}, time - start < duration};
     }));
 ```
 
@@ -173,9 +178,19 @@ c.addPassive(factory.make(
 
 ```cpp
 c.addPassive(factory.make([](const Stats &, const Stats &, const Type &) {
-  Stats bonus{};
-  bonus[std::to_underlying(Stat::AD)] = 20.0;
-  return Champion::PassiveResult{bonus, false};  // alive=false → removed after applying
+  return Champion::PassiveResult{
+      {{Stat::AD, ModType::Base, 20.0, {}}}, false};  // alive=false → removed
+}));
+```
+
+**Inc/More passive** (e.g. +20% AD as Inc, *1.1 AD as More):
+
+```cpp
+c.addPassive(factory.make([](const Stats &, const Stats &, const Type &) {
+  return Champion::PassiveResult{
+      {{Stat::AD, ModType::Inc, 0.2, {}},
+       {Stat::AD, ModType::More, 1.1, {}}},
+      true};
 }));
 ```
 
@@ -191,9 +206,9 @@ c.addPassive({burn.id, make_burn(5.0, 5.0)});  // refresh: same id, new passive
 ## Damage as a passive
 
 Damage fits the passive model without extending the type system: a passive
-returns negative `bonus[CurrentHP]` to reduce the target's HP. Use the
-`mitigated_damage` helper to apply penetration and resistance mitigation
-before turning raw damage into a passive bonus.
+returns a negative `Base` mod for `CurrentHP` to reduce the target's HP. Use
+the `mitigated_damage` helper to apply penetration and resistance mitigation
+before turning raw damage into a passive mod.
 
 ```cpp
 Champion target{{Stat::MaxHP, 1000}, {Stat::CurrentHP, 1000}, {Stat::AR, 100}};
@@ -203,9 +218,8 @@ Champion::PassiveFactory factory;
 Type dealt = moba::mitigated_damage(100.0, TypeDamage::Physical,
                                     target.getBaseStats());
 target.addPassive(factory.make([dealt](const Stats &, const Stats &, const Type &) {
-  Stats bonus{};
-  bonus[std::to_underlying(Stat::CurrentHP)] = -dealt;
-  return Champion::PassiveResult{bonus, false};  // one-shot
+  return Champion::PassiveResult{
+      {{Stat::CurrentHP, ModType::Base, -dealt, {}}}, false};  // one-shot
 }));
 target.evaluateChampion();  // CurrentHP reduced by mitigated damage
 ```
@@ -215,9 +229,9 @@ target.evaluateChampion();  // CurrentHP reduced by mitigated damage
 - **Penetration** (flat + %): `mitigated_damage(raw, type, target, flat, pct)`
   reduces effective resistance before mitigation.
 - **One-shot**: `alive=false` → removed after applying.
-- **Lifesteal/heal**: a passive returning positive `bonus[CurrentHP]`.
+- **Lifesteal/heal**: a passive returning a positive `Base` mod for `CurrentHP`.
 - **DoT**: a temp passive that accumulates damage in captured state per tick.
-- **Armor shred**: a passive returning negative `bonus[AR]` (debuff).
+- **Armor shred**: a passive returning a negative `Base` mod for `AR` (debuff).
 
 See `tests/test_combat.cpp` for working examples (trades, penetration, DoT,
 lifesteal, shred, death).

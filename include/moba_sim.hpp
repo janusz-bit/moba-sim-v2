@@ -111,16 +111,20 @@ struct Champion {
   // 50}};
   Champion(std::initializer_list<std::pair<Stat, Type>> stats);
   Champion() = default;
-  // A Passive receives (base, final, time) and returns a bonus (delta) plus an
-  // `alive` flag. `time` is the absolute simulation time (starts at 0, only
-  // increases). The passive is the sole authority on its lifetime:
+  // A Passive receives (base, final, time) and returns a list of typed
+  // modifiers (Base/Inc/More) plus an `alive` flag. `time` is the absolute
+  // simulation time (starts at 0, only increases). The passive is the sole
+  // authority on its lifetime:
   //   - permanent: always returns `alive=true`
   //   - one-shot: returns `alive=false` after its single application
   //   - temp: returns `alive=false` once it decides to expire (e.g. by
   //     capturing a start time and checking `time - start < duration`)
-  // Passives returning `alive=false` are removed after their bonus is applied.
+  // Passives returning `alive=false` are removed after their mods are applied.
+  // Mods are folded into a copy of mod_db, so a passive can express additive
+  // (Base), percent-increase (Inc), or multiplicative (More) effects via the
+  // standard pipeline.
   struct PassiveResult {
-    Stats bonus{};
+    std::vector<Modifier> mods;
     bool alive = true;
   };
   using Passive = std::function<PassiveResult(
