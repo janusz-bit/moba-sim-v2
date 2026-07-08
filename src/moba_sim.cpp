@@ -228,4 +228,20 @@ Type effective_cc_duration(Type raw_duration, Type tenacity) noexcept {
   return (effective < 0.3) ? 0.3 : effective;
 }
 
+DamageAfterShield apply_damage_to_shield(Type shield, Type current_hp,
+                                         Type mitigated) noexcept {
+  if (mitigated <= 0.0) {
+    return {.shield_remaining = shield, .hp_remaining = current_hp};
+  }
+  if (shield >= mitigated) {
+    return {.shield_remaining = shield - mitigated, .hp_remaining = current_hp};
+  }
+  return {.shield_remaining = 0.0,
+          .hp_remaining = current_hp - (mitigated - shield)};
+}
+
+Type amplified_heal(Type base_heal, Type heal_shield_power) noexcept {
+  return base_heal * (1.0 + heal_shield_power);
+}
+
 } // namespace moba

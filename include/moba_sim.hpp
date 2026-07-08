@@ -46,6 +46,7 @@ enum class Stat : std::uint8_t {
   HealShieldPower, // 0.0–1.0, amplifies heals and shields
   HPRegen,         // HP per 5 seconds
   MPRegen,         // Mana per 5 seconds
+  ShieldHP,        // active shield amount; absorbs damage before CurrentHP
   Count
 };
 enum class ModType : std::uint8_t {
@@ -208,6 +209,22 @@ struct Champion {
 // See: https://wiki.leagueoflegends.com/en-us/Tenacity
 [[nodiscard]] Type effective_cc_duration(Type raw_duration,
                                          Type tenacity) noexcept;
+
+// Apply damage to shield first, then CurrentHP. Returns remaining shield and
+// HP after absorption. Shield absorbs all damage types (normal shield per LoL
+// Wiki). Resistance mitigation is applied BEFORE the shield absorbs.
+// See: https://wiki.leagueoflegends.com/en-us/Shield
+struct DamageAfterShield {
+  Type shield_remaining;
+  Type hp_remaining;
+};
+[[nodiscard]] DamageAfterShield
+apply_damage_to_shield(Type shield, Type current_hp, Type mitigated) noexcept;
+
+// Amplify a heal or shield amount by HealShieldPower. Returns the amplified
+// value. HealShieldPower is 0.0–1.0 (e.g. 0.15 = +15%).
+[[nodiscard]] Type amplified_heal(Type base_heal,
+                                  Type heal_shield_power) noexcept;
 
 // Convenience accessors for Stats indexed by Stat enum.
 [[nodiscard]] inline Type getStat(const Champion::Stats &stats, Stat stat) {
