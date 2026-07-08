@@ -165,7 +165,8 @@ Type Champion::getDeltaStats(const Stats &stats1, const Stats &stats2) {
   return delta;
 }
 
-Champion::Stats Champion::evaluateChampion(Type eps, std::size_t max_iter) {
+Champion::Stats Champion::evaluateChampion(Type eps, std::size_t max_iter,
+                                           Type time) {
   const Stats base = getBaseStats();
   Stats final = base;
   Stats prev = base;
@@ -173,7 +174,7 @@ Champion::Stats Champion::evaluateChampion(Type eps, std::size_t max_iter) {
   std::vector<bool> alive_flags;
   do {
     prev = final;
-    auto [f, flags] = applyPassivesNoRemove(passives, base, prev, 0.0);
+    auto [f, flags] = applyPassivesNoRemove(passives, base, prev, time);
     final = f;
     alive_flags = std::move(flags);
     ++iter;

@@ -1078,3 +1078,87 @@ TEST_CASE("getBaseStats with full mod_db pipeline", "[champion]") {
   // AP: 80 * 1.1 = 88
   REQUIRE(base[std::to_underlying(Stat::AP)] == Catch::Approx(88.0));
 }
+
+// --- evaluateChampion time forwarding ---
+
+TEST_CASE("evaluateChampion forwards time to temp passives", "[champion]") {
+  Champion champ;
+  champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
+  // temp: +10 AD while time < 3.0
+  champ.addPassive(factory().make(
+      [start = 0.0, duration = 3.0](const Stats &, const Stats &, Type time) {
+        Stats bonus{};
+        bonus[std::to_underlying(Stat::AD)] = 10.0;
+        return Champion::PassiveResult{bonus, time - start < duration};
+      }));
+
+  // time=1.0: temp alive → AD = 50 + 10 = 60, passive stays
+  Stats r1 = champ.evaluateChampion(0.0001, 1000, 1.0);
+  REQUIRE(r1[std::to_underlying(Stat::AD)] == Catch::Approx(60.0));
+  REQUIRE(champ.passives.size() == 1);
+
+  // time=3.0: temp expires → AD = 50 + 10 = 60 (bonus applied), then removed
+  Stats r3 = champ.evaluateChampion(0.0001, 1000, 3.0);
+  REQUIRE(r3[std::to_underlying(Stat::AD)] == Catch::Approx(60.0));
+  REQUIRE(champ.passives.empty());
+
+  // re-evaluate at time=3.0: no passive → AD = 50
+  Stats r3b = champ.evaluateChampion(0.0001, 1000, 3.0);
+  REQUIRE(r3b[std::to_underlying(Stat::AD)] == Catch::Approx(50.0));
+}
+
+TEST_CASE("evaluateChampion default time is 0.0 (backward compatible)",
+          "[champion]") {
+  Champion champ;
+  champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
+  // temp: alive while time < 1.0
+  champ.addPassive(factory().make([](const Stats &, const Stats &, Type time) {
+    Stats bonus{};
+    bonus[std::to_underlying(Stat::AD)] = 10.0;
+    return Champion::PassiveResult{bonus, time < 1.0};
+  }));
+  // default time → 0.0 → temp alive (0 < 1)
+  Stats r = champ.evaluateChampion();
+  REQUIRE(r[std::to_underlying(Stat::AD)] == Catch::Approx(60.0));
+  REQUIRE(champ.passives.size() == 1);
+}
+
+TEST_CASE("evaluateChampion time affects temp lifetime, not fixed-point math",
+          "[champion]") {
+  Champion champ;
+  champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
+  // permanent passive: AD += 10% of final AD (fixed-point: 50/0.9 ≈ 55.56)
+  champ.addPassive(factory().make([](const Stats &, const Stats &final, Type) {
+    Stats bonus{};
+    bonus[std::to_underlying(Stat::AD)] =
+        final[std::to_underlying(Stat::AD)] * 0.1;
+    return Champion::PassiveResult{bonus, true};
+  }));
+  // temp: +20 AD while time < 2.0
+  champ.addPassive(factory().make(
+      [start = 0.0, duration = 2.0](const Stats &, const Stats &, Type time) {
+        Stats bonus{};
+        bonus[std::to_underlying(Stat::AD)] = 20.0;
+        return Champion::PassiveResult{bonus, time - start < duration};
+      }));
+
+  // time=0.0: temp alive → fixed-point: final = 50 + 20 + 0.1*final
+  //   → 70/0.9 ≈ 77.78; both passives stay
+  Stats r0 = champ.evaluateChampion(0.0001, 1000, 0.0);
+  REQUIRE(r0[std::to_underlying(Stat::AD)] ==
+          Catch::Approx(77.7778).epsilon(0.001));
+  REQUIRE(champ.passives.size() == 2);
+
+  // time=2.0: temp expires (alive=false) → bonus still applied this call
+  // (fixed-point includes +20: 70/0.9 ≈ 77.78), then temp removed for future
+  Stats r2 = champ.evaluateChampion(0.0001, 1000, 2.0);
+  REQUIRE(r2[std::to_underlying(Stat::AD)] ==
+          Catch::Approx(77.7778).epsilon(0.001));
+  REQUIRE(champ.passives.size() == 1); // temp removed, permanent stays
+
+  // subsequent call at time=2.0: temp gone → fixed-point: 50/0.9 ≈ 55.56
+  Stats r2b = champ.evaluateChampion(0.0001, 1000, 2.0);
+  REQUIRE(r2b[std::to_underlying(Stat::AD)] ==
+          Catch::Approx(55.5556).epsilon(0.001));
+  REQUIRE(champ.passives.size() == 1);
+}

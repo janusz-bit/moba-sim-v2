@@ -166,7 +166,8 @@ struct Champion {
                                           const Stats &stats2);
 
   [[nodiscard]] Stats evaluateChampion(Type eps = 0.01,
-                                       std::size_t max_iter = 1000);
+                                       std::size_t max_iter = 1000,
+                                       Type time = 0.0);
 };
 
 // Damage after applying flat and percentage penetration, then resistance
