@@ -100,12 +100,17 @@ time/counters/handles; the passive is a black box with access to `time`.
 
 ## `addPassive(entry)` — insert or refresh
 
+Passives are identified by a **type-safe enum id**. Define your own `PassiveId`
+enum with one value per named passive slot. `addPassive` deduplicates by id:
+same id = refresh (replace), new id = append.
+
 ```cpp
+enum class PassiveId : std::size_t { Burn, Shield, Shred };
+
 Champion::PassiveFactory factory;
-auto e = factory.make(myPassive);
-champ.addPassive(e);          // insert (new id)
-// later, refresh with a new passive but the same id:
-champ.addPassive({e.id, newPassive});  // replace existing
+champ.addPassive(factory.make(PassiveId::Burn, make_burn(0.0, 3.0)));
+// later, refresh burn with a new start time (same id → replaces):
+champ.addPassive(factory.make(PassiveId::Burn, make_burn(5.0, 5.0)));
 ```
 
 ## `applyPassives(base, final, time)` — one simulation step
@@ -144,9 +149,11 @@ Throws `ConvergenceError` if not converged within `max_iter`.
 **Static champion** (no time):
 
 ```cpp
+enum class PassiveId : std::size_t { BonusAD };
+
 Champion c{{Stat::MaxHP, 1000}, {Stat::AD, 50}, {Stat::AR, 100}};
 Champion::PassiveFactory factory;
-c.addPassive(factory.make([](const Stats &, const Stats &, const Type &) {
+c.addPassive(factory.make(PassiveId::BonusAD, [](const Stats &, const Stats &, const Type &) {
   return Champion::PassiveResult{
       {{Stat::AD, ModType::Base, 10.0, {}}}, true};  // permanent +10 AD
 }));
@@ -167,7 +174,7 @@ for (double t = 0.0; t < 10.0; t += dt) {
 **Temp passive** (e.g. a burn lasting 3 seconds):
 
 ```cpp
-c.addPassive(factory.make(
+c.addPassive(factory.make(PassiveId::Burn,
     [start = 2.0, duration = 3.0](const Stats &, const Stats &, const Type &time) {
       return Champion::PassiveResult{
           {{Stat::AD, ModType::Base, 10.0, {}}}, time - start < duration};
@@ -177,30 +184,31 @@ c.addPassive(factory.make(
 **One-shot passive** (e.g. a burst that fires once):
 
 ```cpp
-c.addPassive(factory.make([](const Stats &, const Stats &, const Type &) {
-  return Champion::PassiveResult{
-      {{Stat::AD, ModType::Base, 20.0, {}}}, false};  // alive=false → removed
-}));
+c.addPassive(factory.make(PassiveId::Burst,
+    [](const Stats &, const Stats &, const Type &) {
+      return Champion::PassiveResult{
+          {{Stat::AD, ModType::Base, 20.0, {}}}, false};  // alive=false → removed
+    }));
 ```
 
 **Inc/More passive** (e.g. +20% AD as Inc, *1.1 AD as More):
 
 ```cpp
-c.addPassive(factory.make([](const Stats &, const Stats &, const Type &) {
-  return Champion::PassiveResult{
-      {{Stat::AD, ModType::Inc, 0.2, {}},
-       {Stat::AD, ModType::More, 1.1, {}}},
-      true};
-}));
+c.addPassive(factory.make(PassiveId::Rage,
+    [](const Stats &, const Stats &, const Type &) {
+      return Champion::PassiveResult{
+          {{Stat::AD, ModType::Inc, 0.2, {}},
+           {Stat::AD, ModType::More, 1.1, {}}},
+          true};
+    }));
 ```
 
-To refresh a temp effect, call `addPassive` again with the same id but a new
-passive (e.g. with an updated `start`):
+To refresh a temp effect (e.g. extend burn duration), call `addPassive` again
+with the same enum id but a new passive:
 
 ```cpp
-auto burn = factory.make(make_burn(0.0, 3.0));
-c.addPassive(burn);                       // insert
-c.addPassive({burn.id, make_burn(5.0, 5.0)});  // refresh: same id, new passive
+c.addPassive(factory.make(PassiveId::Burn, make_burn(0.0, 3.0)));   // insert
+c.addPassive(factory.make(PassiveId::Burn, make_burn(5.0, 5.0))); // refresh
 ```
 
 ## Damage as a passive
@@ -217,10 +225,11 @@ Champion::PassiveFactory factory;
 // 100 physical damage, 0 penetration → 50 post-mitigation
 Type dealt = moba::mitigated_damage(100.0, TypeDamage::Physical,
                                     target.getBaseStats());
-target.addPassive(factory.make([dealt](const Stats &, const Stats &, const Type &) {
-  return Champion::PassiveResult{
-      {{Stat::CurrentHP, ModType::Base, -dealt, {}}}, false};  // one-shot
-}));
+target.addPassive(factory.make(PassiveId::Hit,
+    [dealt](const Stats &, const Stats &, const Type &) {
+      return Champion::PassiveResult{
+          {{Stat::CurrentHP, ModType::Base, -dealt, {}}}, false};  // one-shot
+    }));
 target.evaluateChampion();  // CurrentHP reduced by mitigated damage
 ```
 
