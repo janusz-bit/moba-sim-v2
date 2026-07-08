@@ -9,7 +9,6 @@ using moba::Source;
 using moba::Stat;
 using moba::TypeDamage;
 using Stats = Champion::Stats;
-using moba::passive_id;
 using moba::Type;
 
 namespace {

@@ -149,8 +149,7 @@ struct Champion {
   // A PassiveEntry pairs a passive with a numeric id and a source. The id is
   // used by Champion::addPassive to deduplicate: inserting an entry whose id
   // already exists replaces the existing passive (refresh), otherwise a new
-  // entry is appended. Use the free function `passive_id("name")` to generate
-  // compile-time ids from string names (consteval FNV-1a hash).
+  // entry is appended.
   struct PassiveEntry {
     std::size_t id = 0;
     Source source;
@@ -162,8 +161,6 @@ struct Champion {
   using Passives = std::vector<PassiveEntry>;
 
   // PassiveFactory creates PassiveEntry instances with auto-incremented ids.
-  // Useful for quick prototyping; for named/refreshable passives prefer
-  // `passive_id("name")` which is consteval.
   class PassiveFactory {
     std::size_t next_id_ = 0;
 
@@ -240,23 +237,6 @@ apply_damage_to_shield(Type shield, Type current_hp, Type mitigated) noexcept;
 }
 inline void setStat(Champion::Stats &stats, Stat stat, Type value) {
   stats[std::to_underlying(stat)] = value;
-}
-
-// Compile-time passive id from a string name (consteval FNV-1a 64-bit hash).
-// std::hash is not constexpr in C++23, so FNV-1a is used instead.
-// Use this to create named, refreshable passive slots:
-//   champ.addPassive({passive_id("burn"), make_burn(0.0, 3.0)});
-//   champ.addPassive({passive_id("burn"), make_burn(5.0, 5.0)}); // refresh
-//
-// The id is a std::size_t — no enum needed. Different names → different ids
-// (deterministic, compile-time). Same name → same id (refresh).
-consteval std::size_t passive_id(const char *name) {
-  std::size_t hash = 14695981039346656037ULL; // FNV offset basis
-  for (const char *p = name; *p != '\0'; ++p) {
-    hash ^= static_cast<std::size_t>(static_cast<unsigned char>(*p));
-    hash *= 1099511628211ULL; // FNV prime
-  }
-  return hash;
 }
 
 } // namespace moba

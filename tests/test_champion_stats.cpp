@@ -10,7 +10,6 @@
 
 using moba::Champion;
 using moba::ModType;
-using moba::passive_id;
 using moba::Source;
 using moba::Stat;
 using moba::Type;
@@ -768,10 +767,17 @@ TEST_CASE("applyPassives temp passive with zero duration expires immediately",
 
 // --- Passive factory: edge cases ---
 
-TEST_CASE("passive_id generates different ids for different names",
-          "[champion][edge]") {
-  REQUIRE(moba::passive_id("burn") != moba::passive_id("shield"));
-  REQUIRE(moba::passive_id("burn") == moba::passive_id("burn"));
+TEST_CASE("PassiveFactory auto-increments ids", "[champion][edge]") {
+  Champion::PassiveFactory f;
+  auto e1 = f.make([](const Stats &, const Stats &, Type) {
+    return Champion::PassiveResult{{}, true};
+  });
+  auto e2 = f.make([](const Stats &, const Stats &, Type) {
+    return Champion::PassiveResult{{}, true};
+  });
+  REQUIRE(e1.id != e2.id);
+  REQUIRE(e1.id == 0);
+  REQUIRE(e2.id == 1);
 }
 
 TEST_CASE("addPassive refresh with same id replaces passive",
@@ -784,14 +790,12 @@ TEST_CASE("addPassive refresh with same id replaces passive",
   auto passive2 = [](const Stats &, const Stats &, Type) {
     return Champion::PassiveResult{{{Stat::AD, ModType::Base, 20.0, {}}}, true};
   };
-  champ.addPassive(
-      Champion::PassiveEntry{passive_id("refresh_test"), passive1});
+  champ.addPassive(Champion::PassiveEntry{42, passive1});
   REQUIRE(champ.passives.size() == 1);
 
-  // Refresh with +20 instead of +10
-  champ.addPassive(
-      Champion::PassiveEntry{passive_id("refresh_test"), passive2}); // refresh
-  REQUIRE(champ.passives.size() == 1); // still 1, replaced
+  // Refresh with +20 instead of +10 (same id = 42)
+  champ.addPassive(Champion::PassiveEntry{42, passive2}); // refresh
+  REQUIRE(champ.passives.size() == 1);                    // still 1, replaced
   Stats base = champ.getBaseStats();
   Stats r = champ.applyPassives(base, base);
   REQUIRE(r[std::to_underlying(Stat::AD)] ==
@@ -960,7 +964,7 @@ TEST_CASE("addPassive refresh without source keeps old source",
   Champion champ;
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
   champ.addPassive(Champion::PassiveEntry{
-      passive_id("refresh_source_keep"),
+      100,
       [](const Stats &, const Stats &, Type) {
         return Champion::PassiveResult{{{Stat::AD, ModType::Base, 10.0, {}}},
                                        true};
@@ -969,12 +973,12 @@ TEST_CASE("addPassive refresh without source keeps old source",
   REQUIRE(champ.passives[0].source.name == "Item");
 
   // Refresh without source → keeps old source
-  champ.addPassive(Champion::PassiveEntry{
-      passive_id("refresh_source_keep"),
-      [](const Stats &, const Stats &, Type) {
-        return Champion::PassiveResult{{{Stat::AD, ModType::Base, 20.0, {}}},
-                                       true};
-      }});
+  champ.addPassive(
+      Champion::PassiveEntry{100, [](const Stats &, const Stats &, Type) {
+                               return Champion::PassiveResult{
+                                   {{Stat::AD, ModType::Base, 20.0, {}}},
+                                   true};
+                             }});
   REQUIRE(champ.passives[0].source.name == "Item");
   REQUIRE(champ.passives[0].source.origin == "attacker");
 }
@@ -984,7 +988,7 @@ TEST_CASE("addPassive refresh with new source updates source",
   Champion champ;
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
   champ.addPassive(Champion::PassiveEntry{
-      passive_id("refresh_source_update"),
+      101,
       [](const Stats &, const Stats &, Type) {
         return Champion::PassiveResult{{{Stat::AD, ModType::Base, 10.0, {}}},
                                        true};
@@ -993,7 +997,7 @@ TEST_CASE("addPassive refresh with new source updates source",
 
   // Refresh with new source
   champ.addPassive(Champion::PassiveEntry{
-      passive_id("refresh_source_update"),
+      101,
       [](const Stats &, const Stats &, Type) {
         return Champion::PassiveResult{{{Stat::AD, ModType::Base, 20.0, {}}},
                                        true};

@@ -10,11 +10,10 @@ using moba::ModType;
 using moba::Source;
 using moba::Stat;
 using Stats = Champion::Stats;
-using moba::passive_id;
 using moba::Type;
 
 // Factory instance shared across tests in this file. make() auto-increments
-// ids; for named/refreshable passives use passive_id("name").
+// ids; for refresh, re-add with the same id via PassiveEntry{id, passive}.
 namespace {
 Champion::PassiveFactory &factory() {
   static Champion::PassiveFactory f;
