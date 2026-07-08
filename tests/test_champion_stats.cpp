@@ -955,3 +955,148 @@ TEST_CASE("post_mitigation_damage at armor=-100 boundary is exactly 150",
   // armor=-100: 100 * (2 - 100/(100-(-100))) = 100 * (2 - 0.5) = 150
   REQUIRE(moba::post_mitigation_damage(100.0, -100.0) == Catch::Approx(150.0));
 }
+
+// --- Source origin field ---
+
+TEST_CASE("Source default-constructed has empty origin", "[source]") {
+  Source s;
+  REQUIRE(s.name.empty());
+  REQUIRE(s.description.empty());
+  REQUIRE(s.origin.empty());
+}
+
+TEST_CASE("Source three-arg ctor sets origin", "[source]") {
+  Source s{"Item", "Bloodthirster", "attacker"};
+  REQUIRE(s.name == "Item");
+  REQUIRE(s.description == "Bloodthirster");
+  REQUIRE(s.origin == "attacker");
+}
+
+TEST_CASE("Source initializer_list with 3 elements sets origin", "[source]") {
+  Source s{"Rune", "Bloodline", "defender"};
+  REQUIRE(s.origin == "defender");
+}
+
+TEST_CASE("Source initializer_list with 2 elements leaves origin empty",
+          "[source]") {
+  Source s{"Item", "Black Cleaver"};
+  REQUIRE(s.name == "Item");
+  REQUIRE(s.description == "Black Cleaver");
+  REQUIRE(s.origin.empty());
+}
+
+TEST_CASE("Source equality compares all three fields", "[source]") {
+  Source a{"Item", "desc", "attacker"};
+  Source b{"Item", "desc", "attacker"};
+  Source c{"Item", "desc", "defender"};
+  REQUIRE(a == b);
+  REQUIRE(a != c);
+}
+
+// --- PassiveEntry source ---
+
+TEST_CASE("PassiveEntry default source is empty", "[passive][source]") {
+  Champion::PassiveFactory f;
+  auto e = f.make(PassiveId::Test16, [](const Stats &, const Stats &, Type) {
+    return Champion::PassiveResult{{}, true};
+  });
+  REQUIRE(e.source.name.empty());
+  REQUIRE(e.source.origin.empty());
+}
+
+TEST_CASE("PassiveEntry with source stores it", "[passive][source]") {
+  Champion::PassiveFactory f;
+  auto e = f.make(
+      PassiveId::Test17,
+      [](const Stats &, const Stats &, Type) {
+        return Champion::PassiveResult{{}, true};
+      },
+      Source{"Item", "Bloodthirster", "attacker"});
+  REQUIRE(e.source.name == "Item");
+  REQUIRE(e.source.description == "Bloodthirster");
+  REQUIRE(e.source.origin == "attacker");
+}
+
+TEST_CASE("addPassive stores source on passive entry", "[passive][source]") {
+  Champion champ;
+  champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
+  champ.addPassive(factory().make(
+      PassiveId::Test18,
+      [](const Stats &, const Stats &, Type) {
+        return Champion::PassiveResult{{{Stat::AD, ModType::Base, 10.0, {}}},
+                                       true};
+      },
+      Source{"Ability", "Courage", "attacker"}));
+  REQUIRE(champ.passives.size() == 1);
+  REQUIRE(champ.passives[0].source.name == "Ability");
+  REQUIRE(champ.passives[0].source.origin == "attacker");
+}
+
+TEST_CASE("addPassive refresh without source keeps old source",
+          "[passive][source]") {
+  Champion champ;
+  champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
+  champ.addPassive(factory().make(
+      PassiveId::Test19,
+      [](const Stats &, const Stats &, Type) {
+        return Champion::PassiveResult{{{Stat::AD, ModType::Base, 10.0, {}}},
+                                       true};
+      },
+      Source{"Item", "Black Cleaver", "attacker"}));
+  REQUIRE(champ.passives[0].source.name == "Item");
+
+  // Refresh without source → keeps old source
+  champ.addPassive(
+      factory().make(PassiveId::Test19, [](const Stats &, const Stats &, Type) {
+        return Champion::PassiveResult{{{Stat::AD, ModType::Base, 20.0, {}}},
+                                       true};
+      }));
+  REQUIRE(champ.passives[0].source.name == "Item");
+  REQUIRE(champ.passives[0].source.origin == "attacker");
+}
+
+TEST_CASE("addPassive refresh with new source updates source",
+          "[passive][source]") {
+  Champion champ;
+  champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
+  champ.addPassive(factory().make(
+      PassiveId::Test20,
+      [](const Stats &, const Stats &, Type) {
+        return Champion::PassiveResult{{{Stat::AD, ModType::Base, 10.0, {}}},
+                                       true};
+      },
+      Source{"Item", "Black Cleaver", "attacker"}));
+
+  // Refresh with new source
+  champ.addPassive(factory().make(
+      PassiveId::Test20,
+      [](const Stats &, const Stats &, Type) {
+        return Champion::PassiveResult{{{Stat::AD, ModType::Base, 20.0, {}}},
+                                       true};
+      },
+      Source{"Rune", "Bloodline", "defender"}));
+  REQUIRE(champ.passives[0].source.name == "Rune");
+  REQUIRE(champ.passives[0].source.origin == "defender");
+}
+
+TEST_CASE("two passives from different origins coexist", "[passive][source]") {
+  Champion champ;
+  champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
+  champ.addPassive(factory().make(
+      PassiveId::Test21,
+      [](const Stats &, const Stats &, Type) {
+        return Champion::PassiveResult{{{Stat::AD, ModType::Base, 10.0, {}}},
+                                       true};
+      },
+      Source{"Item", "Bloodthirster", "attacker"}));
+  champ.addPassive(factory().make(
+      PassiveId::Test22,
+      [](const Stats &, const Stats &, Type) {
+        return Champion::PassiveResult{{{Stat::AD, ModType::Base, 5.0, {}}},
+                                       true};
+      },
+      Source{"Rune", "Bloodline", "defender"}));
+  REQUIRE(champ.passives.size() == 2);
+  REQUIRE(champ.passives[0].source.origin == "attacker");
+  REQUIRE(champ.passives[1].source.origin == "defender");
+}

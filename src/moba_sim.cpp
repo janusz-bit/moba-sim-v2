@@ -137,6 +137,10 @@ void Champion::addPassive(PassiveEntry entry) {
   for (auto &e : passives) {
     if (e.id == entry.id) {
       e.passive = std::move(entry.passive);
+      // Update source if the new entry provides one; otherwise keep existing
+      if (!entry.source.name.empty()) {
+        e.source = std::move(entry.source);
+      }
       return;
     }
   }

@@ -61,13 +61,16 @@ enum class TypeDamage : std::uint8_t { Physical, Magic, True };
 struct Source {
   std::string name;
   std::string description;
+  std::string origin; // who/what added this (e.g. "attacker", "defender",
+                      // "item:Bloodthirster", "ability:Courage")
 
-  Source(std::string n = {}, std::string d = {})
-      : name(std::move(n)), description(std::move(d)) {}
+  Source(std::string n = {}, std::string d = {}, std::string o = {})
+      : name(std::move(n)), description(std::move(d)), origin(std::move(o)) {}
   Source(std::initializer_list<std::string> list) {
     const auto *it = list.begin();
     name = (it != list.end()) ? *it++ : std::string{};
     description = (it != list.end()) ? *it++ : std::string{};
+    origin = (it != list.end()) ? *it++ : std::string{};
   }
 
   bool operator==(const Source &) const = default;
@@ -144,45 +147,55 @@ struct Champion {
   };
   using Passive = std::function<PassiveResult(
       const Stats &base, const Stats &final, const Type &time)>;
-  // A PassiveEntry pairs a passive with an id. The id is used by
+  // A PassiveEntry pairs a passive with an id and a source. The id is used by
   // Champion::addPassive to deduplicate: inserting an entry whose id already
   // exists replaces the existing passive (refresh), otherwise a new entry is
   // appended. The id type is std::size_t so any enum class (e.g. PassiveId)
-  // can be used via std::to_underlying.
+  // can be used via std::to_underlying. The source identifies who/what added
+  // the passive (e.g. "attacker", "item:Bloodthirster").
   struct PassiveEntry {
     std::size_t id = 0;
+    Source source;
     Passive passive;
 
     // Construct from any enum class id (e.g. PassiveId::Burn).
     template <typename Enum>
       requires std::is_enum_v<Enum>
-    PassiveEntry(Enum id_, Passive p)
-        : id(std::to_underlying(id_)), passive(std::move(p)) {}
+    PassiveEntry(Enum id_, Passive p, Source src = {})
+        : id(std::to_underlying(id_)), source(std::move(src)),
+          passive(std::move(p)) {}
 
-    PassiveEntry(std::size_t id_, Passive p) : id(id_), passive(std::move(p)) {}
+    PassiveEntry(std::size_t id_, Passive p, Source src = {})
+        : id(id_), source(std::move(src)), passive(std::move(p)) {}
   };
   using Passives = std::vector<PassiveEntry>;
 
   // PassiveFactory creates PassiveEntry instances from an enum id + passive.
   // The id is NOT auto-generated — the caller provides a meaningful enum value
   // (e.g. PassiveId::Burn). This enables named, type-safe passive slots that
-  // can be refreshed by re-adding with the same id.
+  // can be refreshed by re-adding with the same id. An optional Source
+  // identifies who/what added the passive.
   //
   // Usage:
   //   enum class PassiveId : std::size_t { Burn, Shield, Shred };
   //   Champion::PassiveFactory factory;
   //   champ.addPassive(factory.make(PassiveId::Burn, make_burn(0.0, 3.0)));
-  //   // later, refresh burn with a new start time:
+  //   // with source:
+  //   champ.addPassive(factory.make(PassiveId::Burn, make_burn(0.0, 3.0),
+  //                                  Source{"Item", "Black Cleaver",
+  //                                  "attacker"}));
+  //   // refresh:
   //   champ.addPassive(factory.make(PassiveId::Burn, make_burn(5.0, 5.0)));
   class PassiveFactory {
   public:
-    [[nodiscard]] static PassiveEntry make(std::size_t id, Passive p) {
-      return PassiveEntry{id, std::move(p)};
+    [[nodiscard]] static PassiveEntry make(std::size_t id, Passive p,
+                                           Source src = {}) {
+      return PassiveEntry{id, std::move(p), std::move(src)};
     }
     template <typename Enum>
       requires std::is_enum_v<Enum>
-    [[nodiscard]] PassiveEntry make(Enum id, Passive p) {
-      return PassiveEntry{std::to_underlying(id), std::move(p)};
+    [[nodiscard]] PassiveEntry make(Enum id, Passive p, Source src = {}) {
+      return PassiveEntry{std::to_underlying(id), std::move(p), std::move(src)};
     }
   };
 
