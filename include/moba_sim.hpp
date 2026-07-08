@@ -33,6 +33,19 @@ enum class Stat : std::uint8_t {
   ArmorPenPct,
   MagicPenFlat,
   MagicPenPct,
+  // --- Offensive stats (LoL Wiki: Champion statistic) ---
+  AttackSpeed, // attacks per second (e.g. 0.651)
+  CritChance,  // 0.0–1.0 (e.g. 0.25 = 25%)
+  CritDamage,  // multiplier (e.g. 1.75 = 175%)
+  LifeSteal,   // 0.0–1.0, heals % of post-mitigation basic damage dealt
+  Omnivamp,    // 0.0–1.0, heals % of all damage dealt (physical/magic/true)
+  // --- Defensive stats ---
+  Tenacity,   // 0.0–1.0, reduces incoming CC duration (capped at 1.0)
+  SlowResist, // 0.0–1.0, reduces incoming slow duration
+  // --- Utility stats ---
+  HealShieldPower, // 0.0–1.0, amplifies heals and shields
+  HPRegen,         // HP per 5 seconds
+  MPRegen,         // Mana per 5 seconds
   Count
 };
 enum class ModType : std::uint8_t {
@@ -181,6 +194,20 @@ struct Champion {
                                     const Champion::Stats &target,
                                     Type flat_pen = 0.0,
                                     Type pct_pen = 0.0) noexcept;
+
+// Lifesteal healing from post-mitigation damage. Life steal applies to basic
+// damage; omnivamp applies to all damage types. Returns the heal amount.
+// See: https://wiki.leagueoflegends.com/en-us/Life_steal
+[[nodiscard]] Type lifesteal_heal(Type post_mitigated,
+                                  Type lifesteal_pct) noexcept;
+[[nodiscard]] Type omnivamp_heal(Type post_mitigated,
+                                 Type omnivamp_pct) noexcept;
+
+// Effective crowd control duration after tenacity reduction. Capped at 0.3s
+// minimum (per LoL Wiki). Tenacity is 0.0–1.0.
+// See: https://wiki.leagueoflegends.com/en-us/Tenacity
+[[nodiscard]] Type effective_cc_duration(Type raw_duration,
+                                         Type tenacity) noexcept;
 
 // Convenience accessors for Stats indexed by Stat enum.
 [[nodiscard]] inline Type getStat(const Champion::Stats &stats, Stat stat) {
