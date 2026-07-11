@@ -1,6 +1,7 @@
 #include "moba_sim.hpp"
 #include <algorithm>
 #include <cmath>
+#include <ranges>
 namespace moba {
 
 namespace {
@@ -26,11 +27,11 @@ applyPassivesNoRemove(const ModDB &mod_db,
   ModDB working = mod_db;
   std::vector<bool> alive_flags;
   for (const auto &entry : passives) {
-    auto [mods, alive] = entry.passive(base, final, time);
-    for (const auto &m : mods) {
+    auto result = entry.passive(base, final, time);
+    for (const auto &m : result.mods) {
       working.add(m.stat, m.type, m.value, m.source);
     }
-    alive_flags.push_back(alive);
+    alive_flags.push_back(result.alive);
   }
   return {statsFromModDB(working), std::move(alive_flags)};
 }
@@ -150,11 +151,11 @@ Champion::Stats Champion::applyPassives(const Stats &base, const Stats &final,
                                         const Type &time) {
   ModDB working = mod_db;
   for (auto it = passives.begin(); it != passives.end();) {
-    auto [mods, alive] = it->passive(base, final, time);
-    for (const auto &m : mods) {
+    auto result = it->passive(base, final, time);
+    for (const auto &m : result.mods) {
       working.add(m.stat, m.type, m.value, m.source);
     }
-    if (alive) {
+    if (result.alive) {
       ++it;
     } else {
       it = passives.erase(it);
@@ -245,6 +246,148 @@ DamageAfterShield apply_damage_to_shield(Type shield, Type current_hp,
 
 Type amplified_heal(Type base_heal, Type heal_shield_power) noexcept {
   return base_heal * (1.0 + heal_shield_power);
+}
+
+void Simulation::processEvents(Type eps, std::size_t max_iter) {
+  std::size_t iter = 0;
+  while (!event_queue.empty() && iter < max_iter) {
+    GameEvent ev = std::move(event_queue.front());
+    event_queue.pop_front();
+    ++iter;
+
+    // AttackHit → compute mitigated damage → emit DamageReceived
+    if (ev.kind == EventKind::AttackHit) {
+      if (ev.target_id < champions.size()) {
+        const auto &target_stats = champions[ev.target_id].getBaseStats();
+        Type flat_pen = 0.0;
+        Type pct_pen = 0.0;
+        if (ev.actor_id < champions.size()) {
+          const auto &atk = champions[ev.actor_id].getBaseStats();
+          if (ev.damage_type == TypeDamage::Physical) {
+            flat_pen = getStat(atk, Stat::ArmorPenFlat);
+            pct_pen = getStat(atk, Stat::ArmorPenPct);
+          } else if (ev.damage_type == TypeDamage::Magic) {
+            flat_pen = getStat(atk, Stat::MagicPenFlat);
+            pct_pen = getStat(atk, Stat::MagicPenPct);
+          }
+        }
+        Type mitigated = mitigated_damage(ev.amount,
+                                          ev.damage_type,
+                                          target_stats,
+                                          flat_pen,
+                                          pct_pen);
+        // Build child source: damage derived from attack
+        Source dmg_src{"Damage", "", std::make_shared<Source>(ev.source)};
+        event_queue.push_back({.kind = EventKind::DamageReceived,
+                               .actor_id = ev.actor_id,
+                               .target_id = ev.target_id,
+                               .amount = mitigated,
+                               .damage_type = ev.damage_type,
+                               .source = dmg_src,
+                               .time = ev.time});
+        // Also emit DamageDealt for attacker-side reactions (lifesteal etc.)
+        event_queue.push_back({.kind = EventKind::DamageDealt,
+                               .actor_id = ev.actor_id,
+                               .target_id = ev.target_id,
+                               .amount = mitigated,
+                               .damage_type = ev.damage_type,
+                               .source = dmg_src,
+                               .time = ev.time});
+      }
+      continue;
+    }
+
+    // DamageReceived → apply HP loss to target
+    if (ev.kind == EventKind::DamageReceived) {
+      if (ev.target_id < champions.size()) {
+        auto &target = champions[ev.target_id];
+        auto base = target.getBaseStats();
+        Type shield = getStat(base, Stat::ShieldHP);
+        Type hp = getStat(base, Stat::CurrentHP);
+        auto [sh_left, hp_left] = apply_damage_to_shield(shield, hp, ev.amount);
+        target.mod_db.replace(Stat::CurrentHP,
+                              ModType::Base,
+                              hp_left,
+                              Source{"Base", ""});
+        target.mod_db.replace(Stat::ShieldHP,
+                              ModType::Base,
+                              sh_left,
+                              Source{"Base", ""});
+        // Check death
+        if (hp_left <= 0.0) {
+          event_queue.push_back({.kind = EventKind::Death,
+                                 .actor_id = ev.actor_id,
+                                 .target_id = ev.target_id,
+                                 .amount = 0.0,
+                                 .damage_type = TypeDamage::True,
+                                 .source = Source{"Death", ""},
+                                 .time = ev.time});
+        }
+      }
+    }
+
+    // HealApplied → apply HP gain to target
+    if (ev.kind == EventKind::HealApplied) {
+      if (ev.target_id < champions.size()) {
+        auto &target = champions[ev.target_id];
+        auto base = target.getBaseStats();
+        Type hp = getStat(base, Stat::CurrentHP);
+        Type max_hp = getStat(base, Stat::MaxHP);
+        Type new_hp = std::min(hp + ev.amount, max_hp);
+        target.mod_db.replace(Stat::CurrentHP,
+                              ModType::Base,
+                              new_hp,
+                              Source{"Base", ""});
+      }
+    }
+
+    // Broadcast event to all champions' passives with on_event handlers
+    for (auto &champ : champions) {
+      auto base = champ.getBaseStats();
+      auto final = base;
+      std::vector<std::size_t> to_remove;
+      std::vector<GameEvent> new_events;
+
+      for (std::size_t pi = 0; pi < champ.passives.size(); ++pi) {
+        auto &entry = champ.passives[pi];
+        if (!entry.on_event) {
+          continue;
+        }
+        auto result = (*entry.on_event)(base, final, ev.time, ev);
+        for (const auto &m : result.mods) {
+          champ.mod_db.add(m.stat, m.type, m.value, m.source);
+        }
+        for (auto &ne : result.emitted_events) {
+          new_events.push_back(std::move(ne));
+        }
+        if (!result.alive) {
+          to_remove.push_back(pi);
+        }
+      }
+
+      // Remove dead passives (reverse order for stable erase)
+      for (unsigned long &it : std::views::reverse(to_remove)) {
+        champ.passives.erase(champ.passives.begin() +
+                             static_cast<std::ptrdiff_t>(it));
+      }
+
+      // Enqueue new events
+      for (auto &ne : new_events) {
+        event_queue.push_back(std::move(ne));
+      }
+    }
+
+    // Re-evaluate all champions that have passives (fixed-point)
+    for (auto &champ : champions) {
+      if (!champ.passives.empty()) {
+        (void)champ.evaluateChampion(eps, max_iter, ev.time);
+      }
+    }
+  }
+  if (iter >= max_iter && !event_queue.empty()) {
+    throw ConvergenceError("Simulation::processEvents did not converge after " +
+                           std::to_string(max_iter) + " iterations");
+  }
 }
 
 } // namespace moba

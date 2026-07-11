@@ -892,19 +892,19 @@ TEST_CASE("Source default-constructed has empty origin", "[source]") {
   Source s;
   REQUIRE(s.name.empty());
   REQUIRE(s.description.empty());
-  REQUIRE(s.origin.empty());
+  REQUIRE(s.origin().empty());
 }
 
 TEST_CASE("Source three-arg ctor sets origin", "[source]") {
   Source s{"Item", "Bloodthirster", "attacker"};
   REQUIRE(s.name == "Item");
   REQUIRE(s.description == "Bloodthirster");
-  REQUIRE(s.origin == "attacker");
+  REQUIRE(s.origin() == "attacker");
 }
 
 TEST_CASE("Source initializer_list with 3 elements sets origin", "[source]") {
   Source s{"Rune", "Bloodline", "defender"};
-  REQUIRE(s.origin == "defender");
+  REQUIRE(s.origin() == "defender");
 }
 
 TEST_CASE("Source initializer_list with 2 elements leaves origin empty",
@@ -912,7 +912,7 @@ TEST_CASE("Source initializer_list with 2 elements leaves origin empty",
   Source s{"Item", "Black Cleaver"};
   REQUIRE(s.name == "Item");
   REQUIRE(s.description == "Black Cleaver");
-  REQUIRE(s.origin.empty());
+  REQUIRE(s.origin().empty());
 }
 
 TEST_CASE("Source equality compares all three fields", "[source]") {
@@ -931,7 +931,7 @@ TEST_CASE("PassiveEntry default source is empty", "[passive][source]") {
     return Champion::PassiveResult{{}, true};
   });
   REQUIRE(e.source.name.empty());
-  REQUIRE(e.source.origin.empty());
+  REQUIRE(e.source.origin().empty());
 }
 
 TEST_CASE("PassiveEntry with source stores it", "[passive][source]") {
@@ -942,7 +942,7 @@ TEST_CASE("PassiveEntry with source stores it", "[passive][source]") {
                   Source{"Item", "Bloodthirster", "attacker"});
   REQUIRE(e.source.name == "Item");
   REQUIRE(e.source.description == "Bloodthirster");
-  REQUIRE(e.source.origin == "attacker");
+  REQUIRE(e.source.origin() == "attacker");
 }
 
 TEST_CASE("addPassive stores source on passive entry", "[passive][source]") {
@@ -956,7 +956,7 @@ TEST_CASE("addPassive stores source on passive entry", "[passive][source]") {
       Source{"Ability", "Courage", "attacker"}));
   REQUIRE(champ.passives.size() == 1);
   REQUIRE(champ.passives[0].source.name == "Ability");
-  REQUIRE(champ.passives[0].source.origin == "attacker");
+  REQUIRE(champ.passives[0].source.origin() == "attacker");
 }
 
 TEST_CASE("addPassive refresh without source keeps old source",
@@ -980,7 +980,7 @@ TEST_CASE("addPassive refresh without source keeps old source",
                                    true};
                              }});
   REQUIRE(champ.passives[0].source.name == "Item");
-  REQUIRE(champ.passives[0].source.origin == "attacker");
+  REQUIRE(champ.passives[0].source.origin() == "attacker");
 }
 
 TEST_CASE("addPassive refresh with new source updates source",
@@ -1004,7 +1004,7 @@ TEST_CASE("addPassive refresh with new source updates source",
       },
       Source{"Rune", "Bloodline", "defender"}});
   REQUIRE(champ.passives[0].source.name == "Rune");
-  REQUIRE(champ.passives[0].source.origin == "defender");
+  REQUIRE(champ.passives[0].source.origin() == "defender");
 }
 
 TEST_CASE("two passives from different origins coexist", "[passive][source]") {
@@ -1023,6 +1023,6 @@ TEST_CASE("two passives from different origins coexist", "[passive][source]") {
       },
       Source{"Rune", "Bloodline", "defender"}));
   REQUIRE(champ.passives.size() == 2);
-  REQUIRE(champ.passives[0].source.origin == "attacker");
-  REQUIRE(champ.passives[1].source.origin == "defender");
+  REQUIRE(champ.passives[0].source.origin() == "attacker");
+  REQUIRE(champ.passives[1].source.origin() == "defender");
 }

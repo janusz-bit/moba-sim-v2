@@ -3,11 +3,15 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <initializer_list>
+#include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace moba {
@@ -57,22 +61,57 @@ enum class ModType : std::uint8_t {
 
 enum class TypeDamage : std::uint8_t { Physical, Magic, True };
 
+struct Source;
+using SourcePtr = std::shared_ptr<Source>;
+
 struct Source {
   std::string name;
   std::string description;
-  std::string origin; // who/what added this (e.g. "attacker", "defender",
-                      // "item:Bloodthirster", "ability:Courage")
+  SourcePtr parent; // who/what added this (chainable provenance).
+                    // nullptr = root source.
 
-  Source(std::string n = {}, std::string d = {}, std::string o = {})
-      : name(std::move(n)), description(std::move(d)), origin(std::move(o)) {}
+  Source(std::string n = {}, std::string d = {}, SourcePtr p = {})
+      : name(std::move(n)), description(std::move(d)), parent(std::move(p)) {}
+
+  // Convenience: 3rd arg as string → creates a root parent with that name.
+  // Enables backward-compatible Source{"Item", "Bloodthirster", "attacker"}.
+  Source(std::string n, std::string d, std::string origin_name)
+      : name(std::move(n)), description(std::move(d)),
+        parent(origin_name.empty()
+                   ? SourcePtr{}
+                   : std::make_shared<Source>(std::move(origin_name))) {}
+
+  // Backward-compatible initializer_list constructor.
+  // {"name", "desc", "origin"} → parent = make_shared<Source>("origin")
   Source(std::initializer_list<std::string> list) {
     const auto *it = list.begin();
     name = (it != list.end()) ? *it++ : std::string{};
     description = (it != list.end()) ? *it++ : std::string{};
-    origin = (it != list.end()) ? *it++ : std::string{};
+    if (it != list.end()) {
+      std::string origin_name = *it++;
+      if (!origin_name.empty()) {
+        parent = std::make_shared<Source>(std::move(origin_name));
+      }
+    }
   }
 
-  bool operator==(const Source &) const = default;
+  // Walk the chain: returns the origin (root parent's name), or "" if none.
+  [[nodiscard]] std::string origin() const {
+    return parent ? parent->name : std::string{};
+  }
+
+  bool operator==(const Source &o) const {
+    if (name != o.name || description != o.description) {
+      return false;
+    }
+    if (!parent && !o.parent) {
+      return true;
+    }
+    if (!parent || !o.parent) {
+      return false;
+    }
+    return *parent == *o.parent;
+  }
 };
 
 struct Modifier {
@@ -121,6 +160,31 @@ public:
   explicit ConvergenceError(const std::string &msg) : std::runtime_error(msg) {}
 };
 
+// --- Event system ---
+
+enum class EventKind : std::uint8_t {
+  AttackHit,
+  DamageDealt,
+  DamageReceived,
+  HealApplied,
+  ShieldBroken,
+  CCApplied,
+  Kill,
+  Death,
+};
+
+struct GameEvent {
+  EventKind kind{};
+  std::size_t actor_id = 0;  // index in Simulation::champions
+  std::size_t target_id = 0; // index (may equal actor_id for self-heal)
+  Type amount = 0.0;         // raw damage / heal / etc.
+  TypeDamage damage_type = TypeDamage::True;
+  Source source;   // provenance chain
+  Type time = 0.0; // when it happened
+
+  bool operator==(const GameEvent &) const = default;
+};
+
 struct Champion {
   using Stats = std::array<Type, std::to_underlying(Stat::Count)>;
   // Construct a champion with base stats from an initializer list of
@@ -142,21 +206,35 @@ struct Champion {
   // standard pipeline.
   struct PassiveResult {
     std::vector<Modifier> mods;
+    std::vector<GameEvent> emitted_events;
     bool alive = true;
+
+    // Backward-compatible: PassiveResult{mods, alive}
+    PassiveResult(std::vector<Modifier> m = {}, bool a = true,
+                  std::vector<GameEvent> ev = {})
+        : mods(std::move(m)), emitted_events(std::move(ev)), alive(a) {}
   };
   using Passive = std::function<PassiveResult(
       const Stats &base, const Stats &final, const Type &time)>;
-  // A PassiveEntry pairs a passive with a numeric id and a source. The id is
-  // used by Champion::addPassive to deduplicate: inserting an entry whose id
-  // already exists replaces the existing passive (refresh), otherwise a new
-  // entry is appended.
+  // An EventPassive reacts to a GameEvent and can emit new events + mods.
+  using EventPassive =
+      std::function<PassiveResult(const Stats &base, const Stats &final,
+                                  const Type &time, const GameEvent &event)>;
+  // A PassiveEntry pairs a passive with a numeric id, a source, an optional
+  // event handler, and the passive itself. The id is used by
+  // Champion::addPassive to deduplicate: inserting an entry whose id already
+  // exists replaces the existing passive (refresh), otherwise a new entry is
+  // appended.
   struct PassiveEntry {
     std::size_t id = 0;
     Source source;
     Passive passive;
+    std::optional<EventPassive> on_event;
 
-    PassiveEntry(std::size_t id_, Passive p, Source src = {})
-        : id(id_), source(std::move(src)), passive(std::move(p)) {}
+    PassiveEntry(std::size_t id_, Passive p, Source src = {},
+                 std::optional<EventPassive> ev = {})
+        : id(id_), source(std::move(src)), passive(std::move(p)),
+          on_event(std::move(ev)) {}
   };
   using Passives = std::vector<PassiveEntry>;
 
@@ -167,6 +245,12 @@ struct Champion {
   public:
     [[nodiscard]] PassiveEntry make(Passive p, Source src = {}) {
       return PassiveEntry{next_id_++, std::move(p), std::move(src)};
+    }
+    [[nodiscard]] PassiveEntry make(Passive p, Source src, EventPassive ev) {
+      return PassiveEntry{next_id_++,
+                          std::move(p),
+                          std::move(src),
+                          std::move(ev)};
     }
   };
 
@@ -238,5 +322,22 @@ apply_damage_to_shield(Type shield, Type current_hp, Type mitigated) noexcept;
 inline void setStat(Champion::Stats &stats, Stat stat, Type value) {
   stats[std::to_underlying(stat)] = value;
 }
+
+// --- Simulation: event queue + cross-champion dispatch ---
+
+struct Simulation {
+  std::vector<Champion> champions;
+  std::deque<GameEvent> event_queue;
+
+  void enqueue(GameEvent ev) { event_queue.push_back(std::move(ev)); }
+
+  // Process the event queue FIFO. For each event:
+  //   1. AttackHit → compute mitigated damage → enqueue DamageReceived
+  //   2. Broadcast event to all passives of all champions with on_event
+  //   3. Collect emitted events → append to queue
+  //   4. Re-evaluate affected champions (fixed-point)
+  // Repeats until queue empty or max_iter exceeded.
+  void processEvents(Type eps = 0.01, std::size_t max_iter = 10000);
+};
 
 } // namespace moba

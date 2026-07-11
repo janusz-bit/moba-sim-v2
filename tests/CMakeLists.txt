@@ -8,6 +8,7 @@ add_executable(moba_sim_tests
     test_scenarios.cpp
     test_combat.cpp
     test_champion_stats.cpp
+    test_events.cpp
 )
 
 target_link_libraries(moba_sim_tests
