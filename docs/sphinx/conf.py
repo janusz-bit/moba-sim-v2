@@ -28,7 +28,7 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 # -- Breathe (Doxygen bridge) ------------------------------------------------
 
 breathe_projects = {
-    "moba-sim": os.path.abspath("_doxygen/xml"),
+    "moba-sim": os.path.abspath("../xml"),
 }
 breathe_default_project = "moba-sim"
 breathe_default_members = ("members", "undoc-members")

@@ -3,7 +3,5 @@ __*/
 compile_commands.json
 .pre-commit-config.yaml
 result
-docs/_doxygen/
+docs/xml/
 docs/_build/
-docs/sphinx/_static/
-docs/sphinx/_templates/

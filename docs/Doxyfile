@@ -7,7 +7,7 @@ RECURSIVE              = YES
 FILE_PATTERNS          = *.hpp *.h
 EXCLUDE_PATTERNS       = */build/*
 
-OUTPUT_DIRECTORY       = _doxygen
+OUTPUT_DIRECTORY       = .
 GENERATE_HTML          = NO
 GENERATE_XML           = YES
 XML_OUTPUT             = xml
