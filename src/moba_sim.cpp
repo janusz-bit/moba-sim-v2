@@ -288,6 +288,31 @@ Simulation::Simulation() {
                         .time = ev.time});
   });
 
+  // DamageDealt -> lifesteal + omnivamp heal on attacker
+  // LifeSteal heals from basic-attack physical damage only.
+  // Omnivamp heals from all damage types.
+  onDamageDealt.subscribe([this](const DamageDealt &ev) {
+    if (ev.actor_id >= champions.size() || ev.amount <= 0.0) {
+      return;
+    }
+    const auto &atk = champions[ev.actor_id].getBaseStats();
+    Type lifesteal_pct = getStat(atk, Stat::LifeSteal);
+    Type omnivamp_pct = getStat(atk, Stat::Omnivamp);
+    // LifeSteal applies to physical damage only (basic attacks).
+    // Omnivamp applies to all damage.
+    Type heal = 0.0;
+    if (ev.damage_type == TypeDamage::Physical) {
+      heal += ev.amount * lifesteal_pct;
+    }
+    heal += ev.amount * omnivamp_pct;
+    if (heal > 0.0) {
+      onHealApplied.emit({.target_id = ev.actor_id,
+                          .amount = heal,
+                          .source = Source{"Lifesteal", ""},
+                          .time = ev.time});
+    }
+  });
+
   // DamageReceived -> apply HP loss (shield absorbs) -> emit Death if HP <= 0
   onDamageReceived.subscribe([this](const DamageReceived &ev) {
     if (ev.target_id >= champions.size()) {

@@ -112,7 +112,7 @@ TEST_CASE("Shield proc on DamageReceived grants shield", "[events]") {
   REQUIRE(getStat(t, Stat::ShieldHP) == Catch::Approx(200.0).epsilon(0.01));
 }
 
-TEST_CASE("Lifesteal via DamageDealt emits HealApplied", "[events]") {
+TEST_CASE("Lifesteal is built into Simulation", "[events]") {
   Simulation sim;
   Champion attacker{{Stat::MaxHP, 1000},
                     {Stat::CurrentHP, 800},
@@ -124,14 +124,7 @@ TEST_CASE("Lifesteal via DamageDealt emits HealApplied", "[events]") {
   sim.champions.push_back(std::move(attacker));
   sim.champions.push_back(std::move(target));
 
-  // Lifesteal: on DamageDealt -> heal attacker by dealt * lifesteal_pct
-  sim.onDamageDealt.subscribe([&sim](const DamageDealt &ev) {
-    auto atk = sim.champions[ev.actor_id].getBaseStats();
-    Type heal = ev.amount * getStat(atk, Stat::LifeSteal);
-    sim.onHealApplied.emit(
-        {ev.actor_id, heal, Source{"Lifesteal", ""}, ev.time});
-  });
-
+  // No manual subscription needed — lifesteal is automatic via internal handler
   sim.onAttackHit.emit(
       {0, 1, 100.0, TypeDamage::Physical, Source{"Basic attack", ""}, 0.0});
 
@@ -141,6 +134,48 @@ TEST_CASE("Lifesteal via DamageDealt emits HealApplied", "[events]") {
   // Target took 50 damage
   Stats t = sim.champions[1].getBaseStats();
   REQUIRE(getStat(t, Stat::CurrentHP) == Catch::Approx(950.0).epsilon(0.01));
+}
+
+TEST_CASE("Omnivamp heals from all damage types", "[events]") {
+  Simulation sim;
+  Champion attacker{{Stat::MaxHP, 1000},
+                    {Stat::CurrentHP, 800},
+                    {Stat::AD, 100},
+                    {Stat::Omnivamp, 0.10}};
+  Champion target{{Stat::MaxHP, 1000},
+                  {Stat::CurrentHP, 1000},
+                  {Stat::MR, 100}};
+  sim.champions.push_back(std::move(attacker));
+  sim.champions.push_back(std::move(target));
+
+  // Magic damage — omnivamp applies, lifesteal doesn't
+  sim.onAttackHit.emit(
+      {0, 1, 100.0, TypeDamage::Magic, Source{"Spell", ""}, 0.0});
+
+  // 100 magic vs 100 MR -> 50 post-mitigation. Omnivamp: 50 * 0.10 = 5 heal
+  Stats a = sim.champions[0].getBaseStats();
+  REQUIRE(getStat(a, Stat::CurrentHP) == Catch::Approx(805.0).epsilon(0.01));
+}
+
+TEST_CASE("LifeSteal does not trigger on magic damage", "[events]") {
+  Simulation sim;
+  Champion attacker{{Stat::MaxHP, 1000},
+                    {Stat::CurrentHP, 800},
+                    {Stat::AD, 100},
+                    {Stat::LifeSteal, 0.20}};
+  Champion target{{Stat::MaxHP, 1000},
+                  {Stat::CurrentHP, 1000},
+                  {Stat::MR, 100}};
+  sim.champions.push_back(std::move(attacker));
+  sim.champions.push_back(std::move(target));
+
+  // Magic damage — lifesteal should NOT trigger
+  sim.onAttackHit.emit(
+      {0, 1, 100.0, TypeDamage::Magic, Source{"Spell", ""}, 0.0});
+
+  // 100 magic vs 100 MR -> 50 post-mitigation, no heal
+  Stats a = sim.champions[0].getBaseStats();
+  REQUIRE(getStat(a, Stat::CurrentHP) == Catch::Approx(800.0).epsilon(0.01));
 }
 
 TEST_CASE("Event source chain tracks provenance", "[events][source]") {

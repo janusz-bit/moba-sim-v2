@@ -115,7 +115,8 @@ def test_attack_hit_deals_damage():
         sim.clear_signals()
 
 
-def test_lifesteal_via_signal():
+def test_lifesteal_builtin():
+    """Lifesteal is now built into the Simulation — no manual subscription needed."""
     sim = Simulation()
     try:
         sim.add_champion(
@@ -126,13 +127,7 @@ def test_lifesteal_via_signal():
             Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 1000, Stat.AR: 100})
         )
 
-        def lifesteal(ev):
-            atk = sim.get_champion(ev.actor_id).get_base_stats()
-            heal = ev.amount * atk[Stat.LifeSteal]
-            sim.emit_heal_applied(ev.actor_id, heal, Source("Lifesteal"), ev.time)
-
-        sim.on_damage_dealt_subscribe(lifesteal)
-
+        # No on_damage_dealt_subscribe needed — lifesteal is automatic
         sim.emit_attack_hit(0, 1, 100.0, TypeDamage.Physical,
                             Source("Basic attack"), 0.0)
 
@@ -140,6 +135,53 @@ def test_lifesteal_via_signal():
         assert atk[Stat.CurrentHP] == pytest.approx(806.0)  # 800 + 6 (50 * 0.12)
         tgt = sim.get_champion(1).get_base_stats()
         assert tgt[Stat.CurrentHP] == pytest.approx(950.0)
+    finally:
+        sim.clear_signals()
+
+
+def test_omnivamp_builtin():
+    """Omnivamp heals from all damage types, not just physical."""
+    sim = Simulation()
+    try:
+        sim.add_champion(
+            Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 800,
+                      Stat.AD: 100, Stat.Omnivamp: 0.10})
+        )
+        sim.add_champion(
+            Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 1000, Stat.MR: 100})
+        )
+
+        # Magic damage — omnivamp applies, lifesteal doesn't
+        sim.emit_attack_hit(0, 1, 100.0, TypeDamage.Magic,
+                            Source("Spell"), 0.0)
+
+        # 100 magic vs 100 MR -> 50 post-mitigation
+        # Omnivamp: 50 * 0.10 = 5 heal
+        atk = sim.get_champion(0).get_base_stats()
+        assert atk[Stat.CurrentHP] == pytest.approx(805.0)
+    finally:
+        sim.clear_signals()
+
+
+def test_lifesteal_magic_doesnt_trigger():
+    """LifeSteal only applies to physical damage, not magic."""
+    sim = Simulation()
+    try:
+        sim.add_champion(
+            Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 800,
+                      Stat.AD: 100, Stat.LifeSteal: 0.20})
+        )
+        sim.add_champion(
+            Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 1000, Stat.MR: 100})
+        )
+
+        # Magic damage — lifesteal should NOT trigger
+        sim.emit_attack_hit(0, 1, 100.0, TypeDamage.Magic,
+                            Source("Spell"), 0.0)
+
+        # 100 magic vs 100 MR -> 50 post-mitigation, no heal
+        atk = sim.get_champion(0).get_base_stats()
+        assert atk[Stat.CurrentHP] == pytest.approx(800.0)
     finally:
         sim.clear_signals()
 
