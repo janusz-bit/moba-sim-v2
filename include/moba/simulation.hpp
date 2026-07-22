@@ -2,28 +2,41 @@
 
 #include "moba/champion.hpp"
 #include "moba/event.hpp"
+#include "moba/signal.hpp"
 
 #include <cstddef>
-#include <deque>
-#include <utility>
 #include <vector>
 
 namespace moba {
 
-// Simulation: event queue + cross-champion dispatch.
+// Simulation: signal-based event dispatch.
+//
+// Each event type is a Signal<EventType>.  The Simulation constructor wires
+// internal handlers that implement the core rules (damage application, death
+// detection, healing).  User passives subscribe to the same signals to react
+// or chain new events.
+//
+// Usage:
+//   Simulation sim;
+//   sim.champions.push_back(attacker);
+//   sim.champions.push_back(target);
+//   sim.onDamageReceived.subscribe([&](const DamageReceived &ev) { ... });
+//   sim.onAttackHit.emit({0, 1, 100.0, TypeDamage::Physical, src, 0.0});
+//
 struct Simulation {
   std::vector<Champion> champions;
-  std::deque<GameEvent> event_queue;
 
-  void enqueue(GameEvent ev) { event_queue.push_back(std::move(ev)); }
+  // --- Signals (one per event type) ---
+  Signal<AttackHit> onAttackHit;
+  Signal<DamageDealt> onDamageDealt;
+  Signal<DamageReceived> onDamageReceived;
+  Signal<HealApplied> onHealApplied;
+  Signal<Death> onDeath;
 
-  // Process the event queue FIFO. For each event:
-  //   1. AttackHit -> compute mitigated damage -> enqueue DamageReceived
-  //   2. Broadcast event to all passives of all champions with on_event
-  //   3. Collect emitted events -> append to queue
-  //   4. Re-evaluate affected champions (fixed-point)
-  // Repeats until queue empty or max_iter exceeded.
-  void processEvents(Type eps = 0.01, std::size_t max_iter = 10000);
+  Simulation();
+
+  // Convenience: re-evaluate all champions with passives (fixed-point).
+  void evaluateAll(Type eps = 0.01, std::size_t max_iter = 10000);
 };
 
 } // namespace moba

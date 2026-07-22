@@ -9,7 +9,6 @@
 #include <cstddef>
 #include <functional>
 #include <initializer_list>
-#include <optional>
 #include <utility>
 #include <vector>
 
@@ -38,38 +37,26 @@ struct Champion {
   // standard pipeline.
   struct PassiveResult {
     std::vector<Modifier> mods;
-    std::vector<GameEvent> emitted_events;
     bool alive = true;
 
-    // Backward-compatible: PassiveResult{mods, alive}
-    PassiveResult(std::vector<Modifier> m = {}, bool a = true,
-                  std::vector<GameEvent> ev = {})
-        : mods(std::move(m)), emitted_events(std::move(ev)), alive(a) {}
+    PassiveResult(std::vector<Modifier> m = {}, bool a = true)
+        : mods(std::move(m)), alive(a) {}
   };
 
   using Passive = std::function<PassiveResult(
       const Stats &base, const Stats &final, const Type &time)>;
 
-  // An EventPassive reacts to a GameEvent and can emit new events + mods.
-  using EventPassive =
-      std::function<PassiveResult(const Stats &base, const Stats &final,
-                                  const Type &time, const GameEvent &event)>;
-
-  // A PassiveEntry pairs a passive with a numeric id, a source, an optional
-  // event handler, and the passive itself. The id is used by
-  // Champion::addPassive to deduplicate: inserting an entry whose id already
-  // exists replaces the existing passive (refresh), otherwise a new entry is
-  // appended.
+  // A PassiveEntry pairs a passive with a numeric id, a source, and the
+  // passive itself. The id is used by Champion::addPassive to deduplicate:
+  // inserting an entry whose id already exists replaces the existing passive
+  // (refresh), otherwise a new entry is appended.
   struct PassiveEntry {
     std::size_t id = 0;
     Source source;
     Passive passive;
-    std::optional<EventPassive> on_event;
 
-    PassiveEntry(std::size_t id_, Passive p, Source src = {},
-                 std::optional<EventPassive> ev = {})
-        : id(id_), source(std::move(src)), passive(std::move(p)),
-          on_event(std::move(ev)) {}
+    PassiveEntry(std::size_t id_, Passive p, Source src = {})
+        : id(id_), source(std::move(src)), passive(std::move(p)) {}
   };
 
   using Passives = std::vector<PassiveEntry>;
@@ -81,12 +68,6 @@ struct Champion {
   public:
     [[nodiscard]] PassiveEntry make(Passive p, Source src = {}) {
       return PassiveEntry{next_id_++, std::move(p), std::move(src)};
-    }
-    [[nodiscard]] PassiveEntry make(Passive p, Source src, EventPassive ev) {
-      return PassiveEntry{next_id_++,
-                          std::move(p),
-                          std::move(src),
-                          std::move(ev)};
     }
   };
 
