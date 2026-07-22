@@ -3,13 +3,14 @@
 A C++23 library for simulating MOBA-style champion stat aggregation, inspired by
 [League of Legends](https://wiki.leagueoflegends.com/). Models the
 Base/Inc/More modifier pipeline, passive effects, and a signal-based event
-system for cross-champion combat. Includes Python bindings via [nanobind](https://github.com/wjakob/nanobind).
+system for cross-champion combat. Includes Python bindings via [nanobind](https://github.com/wjakob/nanobind)
+and API documentation via [Doxygen](https://doxygen.nl/) + [Sphinx](https://www.sphinx-doc.org/).
 
 ## Build
 
 Requires [Nix](https://nixos.org/) with flakes enabled. The development shell
-provides the toolchain (clang, CMake, Catch2, nanobind, numpy, pytest) and
-pre-commit hooks.
+provides the toolchain (clang, CMake, Catch2, nanobind, numpy, pytest, doxygen,
+sphinx) and pre-commit hooks.
 
 ```sh
 nix develop
@@ -28,14 +29,23 @@ python3 -c "from moba import Champion, Stat; print('ok')"
 python3 -m pytest python/tests/
 ```
 
+### Documentation
+
+```sh
+nix develop
+cd docs && doxygen Doxyfile
+sphinx-build -b html sphinx _build
+# Open docs/_build/index.html in a browser
+```
+
 ## Test
 
 C++ tests use [Catch2 v3](https://github.com/catchorg/Catch2), wired through CTest.
 Python tests use pytest.
 
 ```sh
-ctest --test-dir build                                    # C++ (216 tests)
-python3 -m pytest python/tests/                           # Python (17 tests)
+ctest --test-dir build                                    # C++ (218 tests)
+python3 -m pytest python/tests/                           # Python (19 tests)
 ```
 
 ## Nix
@@ -44,6 +54,7 @@ python3 -m pytest python/tests/                           # Python (17 tests)
 | -------------------- | -------------------------------------------------- |
 | `nix develop`        | Dev shell with toolchain + pre-commit hooks        |
 | `nix build`          | Build the `moba_sim` package (headers + static lib) |
+| `nix build .#moba-sim-python` | Build the Python wheel package             |
 | `nix flake check`    | Run pre-commit hooks + build & run tests            |
 | `pre-commit run -a`  | Run linters/formatters manually (inside dev shell)  |
 
@@ -71,6 +82,9 @@ python/
   moba/__init__.py          Python package
   tests/test_moba.py        pytest suite
 tests/                      Catch2 test suite (one file per component)
+docs/
+  Doxyfile                  Doxygen config (generates XML for Breathe)
+  sphinx/                   Sphinx documentation source (RST + conf.py)
 nix/default.nix             Flake module: devShell, pre-commit, package, checks
 ```
 
@@ -132,17 +146,22 @@ handlers that implement the core rules:
 
 ```
 AttackHit      -> mitigated_damage -> emit DamageReceived + DamageDealt
+DamageDealt    -> lifesteal (physical) + omnivamp (all) -> emit HealApplied
 DamageReceived -> HP loss (shield absorbs) -> emit Death if HP <= 0
 HealApplied    -> HP gain (cap MaxHP)
 ```
 
+Lifesteal and omnivamp are **built-in** — no manual signal subscription
+needed. LifeSteal heals the attacker for a percentage of physical damage
+dealt; Omnivamp heals from all damage types.
+
 User code subscribes to the same signals to react or chain new events:
 
 ```cpp
-sim.onDamageDealt.subscribe([&](const DamageDealt &ev) {
-  auto atk = sim.champions[ev.actor_id].getBaseStats();
-  Type heal = ev.amount * getStat(atk, Stat::LifeSteal);
-  sim.onHealApplied.emit({ev.actor_id, heal, Source{"Lifesteal"}, ev.time});
+sim.onDamageReceived.subscribe([&](const DamageReceived &ev) {
+  // Shield proc, counter-attack, etc.
+  sim.champions[ev.target_id].mod_db.add(
+      Stat::ShieldHP, ModType::Base, 200.0, Source{"Sterak's Gage"});
 });
 sim.onAttackHit.emit({0, 1, 100.0, TypeDamage::Physical, Source{"Auto"}, 0.0});
 ```
@@ -235,23 +254,16 @@ print(c.evaluate_champion()[Stat.AD])  # 60.0
 c.add_passive(lambda b, f, t: {"mods": [(Stat.AD, ModType.Base, 25.0)], "alive": False})
 print(c.evaluate_champion()[Stat.AD])  # 85.0, passive consumed
 
-# Simulation with events
+# Simulation with events (lifesteal is built-in — no manual subscription)
 sim = Simulation()
 sim.add_champion(Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 800,
                           Stat.AD: 100, Stat.LifeSteal: 0.12}))
 sim.add_champion(Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 1000, Stat.AR: 100}))
 
-# Lifesteal: on DamageDealt -> heal attacker
-def lifesteal(ev):
-    atk = sim.get_champion(ev.actor_id).get_base_stats()
-    heal = ev.amount * atk[Stat.LifeSteal]
-    sim.emit_heal_applied(ev.actor_id, heal, Source("Lifesteal"), ev.time)
-
-sim.on_damage_dealt_subscribe(lifesteal)
 sim.emit_attack_hit(0, 1, 100.0, TypeDamage.Physical, Source("Basic attack"), 0.0)
 
-print(sim.get_champion(0).get_base_stats()[Stat.CurrentHP])  # 806.0
-print(sim.get_champion(1).get_base_stats()[Stat.CurrentHP])  # 950.0
+print(sim.get_champion(0).get_base_stats()[Stat.CurrentHP])  # 806.0 (lifesteal: +6)
+print(sim.get_champion(1).get_base_stats()[Stat.CurrentHP])  # 950.0 (50 mitigated)
 ```
 
 - **Stats** are returned as `numpy.ndarray` (float64, shape `[25]`), indexable
@@ -260,6 +272,8 @@ print(sim.get_champion(1).get_base_stats()[Stat.CurrentHP])  # 950.0
   List = `[(Stat, ModType, value, [Source]), ...]` (alive=True). Dict =
   `{"mods": [...], "alive": bool}`.
 - **Signals**: `sim.on_*_subscribe(callback)` to react; `sim.emit_*()` to fire.
+- **Lifesteal/Omnivamp**: built into `Simulation` — automatically heals the
+  attacker based on `LifeSteal` (physical only) and `Omnivamp` (all types).
 - **TypeDamage.True_** is used instead of `True` (Python keyword).
 
 See `python/tests/test_moba.py` for the full test suite.
