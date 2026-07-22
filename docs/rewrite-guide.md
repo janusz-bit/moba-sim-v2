@@ -473,19 +473,254 @@ sphinx-build -b html sphinx _build
 
 ---
 
-## 14. kolejność implementacji (sugerowana)
+## 14. Ujednolicenie passives i signals
+
+### Problem w obecnym projekcie
+
+Obecnie istnieją **dwa rozłączne systemy reakcji**:
+
+1. **Passives** (`Champion::Passive`) — wołane podczas `evaluateChampion()` /
+   `applyPassives()`. Otrzymują `(base, final, time)`, zwracają modyfikatory.
+   Nie widzą eventów. Nie mogą zareagować na obrażenia, heal, śmierć.
+
+2. **Signals** (`Simulation::onDamageReceived.subscribe(...)`) — wołane gdy
+   event jest emitowany. Widzą event, mogą modyfikować `mod_db` ręcznie, ale
+   nie uczestniczą w fixed-point iteration. Nie zwracają `PassiveResult`.
+
+To zmusza użytkownika do pisania **two parallel code paths**:
+- Pasyw dająca bonus AD → `addPassive(callback)`
+- Pasyw dająca shield na DamageReceived → `on_damage_received_subscribe(callback)`
+- Pasyw dająca bonus AD i shield na DamageReceived → **oba**, zduplikowana logika
+
+Nie da się napisać jednej pasywki która "daje +10 AD permanentnie i +200
+shield gdy otrzyma damage". Trzeba to rozbić na dwie części w dwóch
+systemach.
+
+### Rozwiązanie: jeden callback z event-aware sygnaturą
+
+Passive otrzymuje opcjonalny event. Gdy jest wołana z `event = monostate`
+(zwykła ewaluacja statów) — działa jak dziś. Gdy jest wołana z konkretnym
+eventem — może zareagować:
+
+```cpp
+// Event który passive może zobaczyć (lub nie — monostate = normalna ewaluacja)
+using PassiveEvent = std::variant<
+    std::monostate,       // brak eventu — normalna ewaluacja
+    AttackHit,
+    DamageDealt,
+    DamageReceived,
+    HealApplied,
+    Death
+>;
+
+using Passive = std::function<PassiveResult(
+    const Stats &base,
+    const Stats &final,
+    const Type &time,
+    const PassiveEvent &event)>;
+```
+
+### PassiveResult — rozszerzone
+
+Passive może nie tylko zwracać modyfikatory, ale też emitować eventy
+(jak obecne `emitted_events` które zostało usunięte — teraz wraca, ale
+czystsze):
+
+```cpp
+struct PassiveResult {
+    std::vector<Modifier> mods;
+    std::vector<PassiveEvent> emitted_events;  // nowe eventy do dispatchu
+    bool alive = true;
+};
+```
+
+### Jak to działa w fixed-point
+
+`evaluateChampion()` woła passive z `event = monostate` — pasywa zwraca
+modyfikatory, iteracja do zbieżności. Jak dziś.
+
+### Jak to działa z eventami
+
+`Simulation` dispatchuje event do **wszystkich passyw wszystkich championów**:
+
+```
+1. Event arrives (np. DamageReceived dla championa #1)
+2. Simulation.iterate:
+   for each champion:
+     for each passive in champion.passives:
+       result = passive(base, final, time, event)
+       apply result.mods to champion.mod_db
+       enqueue result.emitted_events
+   re-evaluate affected champions (fixed-point z eventem w ręce)
+3. Flush emitted_events (kolejne iteracje)
+```
+
+Klucz: passive widzi event **wraz z** normalną ewaluacją. Nie trzeba dwóch
+systemów. Pasywa która daje +10 AD i +200 shield na damage to **jeden
+callback**:
+
+```cpp
+factory.make([](const Stats &base, const Stats &final, const Type &time,
+                const PassiveEvent &ev) -> PassiveResult {
+    std::vector<Modifier> mods;
+    mods.push_back({Stat::AD, ModType::Base, 10.0, {}});  // permanent
+
+    if (std::holds_alternative<DamageReceived>(ev)) {
+        mods.push_back({Stat::ShieldHP, ModType::Base, 200.0, {}});  // reactive
+    }
+
+    return {mods, {}, true};
+});
+```
+
+### Signal nadal istnieje — ale dla user-level reactions
+
+`Signal` nie znika. Służy do rzeczy które **nie są pasywami**:
+- Logging / UI updates (`onDeath.subscribe([](const Death &ev) { show_ui(); })`)
+- Meta-systems (achievement tracking, replay recording)
+- Externally triggered events (`onAttackHit.emit(...)`)
+
+Rozróżnienie:
+- **Passive** — modyfikuje statystyki championa, uczestniczy w fixed-point
+- **Signal subscriber** — observer, nie modyfikuje statów, nie uczestniczy
+  w fixed-point
+
+### Simulation.dispatchEvent
+
+Nowa metoda która łączy pasywy i eventy:
+
+```cpp
+void Simulation::dispatchEvent(const PassiveEvent &ev) {
+    // 1. Broadcast eventu do wszystkich pasyw wszystkich championów
+    for (auto &champ : champions) {
+        auto base = champ.getBaseStats();
+        auto final = base;
+        std::vector<PassiveEvent> new_events;
+
+        for (auto it = champ.passives.begin(); it != champ.passives.end();) {
+            auto result = it->passive(base, final, 0.0, ev);
+            for (const auto &m : result.mods) {
+                champ.mod_db.add(m.stat, m.type, m.value, m.source);
+            }
+            for (auto &ne : result.emitted_events) {
+                new_events.push_back(std::move(ne));
+            }
+            if (!result.alive) {
+                it = champ.passives.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        // Kolejkuj nowe eventy
+        for (auto &ne : new_events) {
+            event_queue_.push_back(std::move(ne));
+        }
+    }
+
+    // 2. Re-ewaluacja (fixed-point)
+    evaluateAll();
+
+    // 3. Flush kolejki (rekurencyjnie, ale z limitem)
+    while (!event_queue_.empty() && iter++ < max_iter) {
+        auto next = std::move(event_queue_.front());
+        event_queue_.pop_front();
+        dispatchEvent(next);
+    }
+}
+```
+
+### Wewnętrzne handlery nadal istnieją
+
+`AttackHit → DamageReceived`, `DamageReceived → HP loss → Death`,
+`HealApplied → HP gain` — to nadal wewnętrzne handlery w `Simulation`
+konstruktorze. Ale zamiast subskrybować sygnały, mogą być częścią
+`dispatchEvent`:
+
+```cpp
+void Simulation::dispatchEvent(const PassiveEvent &ev) {
+    // Wewnętrzne reguły (hardcoded game logic)
+    std::visit overloaded{
+        [](std::monostate) {},  // normalna ewaluacja, nic do zrobienia
+        [&](const AttackHit &e) {
+            // mitigated_damage -> emit DamageReceived + DamageDealt
+            ...
+        },
+        [&](const DamageReceived &e) {
+            // HP loss (shield absorbs) -> emit Death if HP <= 0
+            ...
+        },
+        [&](const HealApplied &e) {
+            // HP gain (cap MaxHP)
+            ...
+        },
+        [&](const Death &) {},
+    }, ev);
+
+    // Broadcast do pasyw
+    for (auto &champ : champions) { ... }
+
+    // Re-ewaluacja + flush
+    ...
+}
+```
+
+### Korzyści
+
+1. **Jeden system** — pasywa reagują na eventy i na normalną ewaluację w tej
+   samej sygnaturze
+2. **Brak duplikacji** — "bonus AD + shield na damage" to jeden callback, nie
+   dwa
+3. **Pasywy uczestniczą w fixed-point** — modyfikatory od pasyw są aplikowane
+   przez potok, nie bypassują go
+4. **Signals zostają dla observerów** — logging, UI, meta — bez modyfikacji
+   statów
+5. **Event chaining** — pasywa emitują nowe eventy przez `emitted_events`,
+   `dispatchEvent` flushuje kolejkę rekurencyjnie
+
+### Kompatybilność z Python bindings
+
+Passive callback w Python:
+
+```python
+def my_passive(base, final, time, event):
+    mods = [(Stat.AD, ModType.Base, 10.0)]
+    if isinstance(event, DamageReceived):
+        mods.append((Stat.ShieldHP, ModType.Base, 200.0))
+    return {"mods": mods, "alive": True}
+```
+
+Nanobind mapuje `std::variant<monostate, AttackHit, ...>` na Python
+`None | AttackHit | DamageReceived | ...`. `isinstance` działa naturalnie.
+
+### Co z `Signal::emit()`?
+
+`emit()` nadal jest synchroniczne dla signals (observerów). Ale
+`Simulation::dispatchEvent()` używa kolejki dla pasyw (żeby uniknąć
+stack overflow na deep chain). To rozdziela:
+- **Signals** — natychmiastowe, synchroniczne, dla observerów (bezpieczne
+  bo nie emitują rekurencyjnie)
+- **Passive events** — kolejkowane, flushowane z limitem iteracji, dla
+  modyfikacji statów
+
+---
+
+## 16. Kolejność implementacji (sugerowana)
 
 1. **types.hpp** — Type, Stat, ModType, TypeDamage, ConvergenceError
 2. **source.hpp** — Source z parent chain
 3. **mod_db.hpp + testy** — Modifier, ModDB, pipeline Base/Inc/More
 4. **combat.hpp + testy** — post_mitigation_damage, mitigated_damage,
    apply_damage_to_shield
-5. **champion.hpp + testy** — Champion, PassiveResult, Passive,
-   PassiveEntry, PassiveFactory, applyPassives, evaluateChampion
-6. **signal.hpp** — Signal<Args...>
-7. **event.hpp** — AttackHit, DamageDealt, DamageReceived, HealApplied, Death
-8. **simulation.hpp + testy** — Simulation z wewnętrznymi handlerami
-9. **Python bindings** — nanobind, high-level API
+5. **signal.hpp** — Signal<Args...> (dla observerów)
+6. **event.hpp** — PassiveEvent variant + event structy
+7. **champion.hpp + testy** — Champion, Passive (z event-aware sygnaturą),
+   PassiveResult (z emitted_events), PassiveEntry, PassiveFactory,
+   applyPassives, evaluateChampion
+8. **simulation.hpp + testy** — Simulation z dispatchEvent, wewnętrznymi
+   regułami (AttackHit→DamageReceived, lifesteal, death, heal), kolejką
+   eventów
+9. **Python bindings** — nanobind, high-level API, passive callback z event
 10. **Dokumentacja** — Doxygen comments, Sphinx config, RST pages
 11. **Nix flake** — devShell, package, checks
 
@@ -497,7 +732,7 @@ Pisz testy równolegle z implementacją. Po każdym module:
 
 ---
 
-## 15. Liczby orientacyjne
+## 17. Liczby orientacyjne
 
 | Metryka             | Wartość (obecny projekt) |
 | ------------------- | ----------------------- |
