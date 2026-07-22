@@ -22,7 +22,10 @@
         clang-format.enable = true;
         clang-tidy = {
           enable = true;
-          excludes = [ "^tests/" ];
+          excludes = [
+            "^tests/"
+            "^python/"
+          ];
           args = [
             "--extra-arg=-std=c++23"
             "--extra-arg=-Iinclude"
@@ -48,6 +51,17 @@
             lldb
             boost
             catch2_3
+            # Python bindings toolchain — bundle Python with packages so
+            # PYTHONPATH is wired automatically (per NixOS wiki / withPackages).
+            (python3.withPackages (
+              ps: with ps; [
+                nanobind
+                scikit-build-core
+                numpy
+                pytest
+                virtualenv
+              ]
+            ))
           ]);
       };
 

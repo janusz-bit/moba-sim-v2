@@ -1,0 +1,22 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.4"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "moba-sim"
+version = "0.1.0"
+description = "MOBA-style champion stat aggregation and combat simulation"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.20"]
+
+[project.optional-dependencies]
+test = ["pytest>=7.0", "pytest-cov"]
+
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+build-dir = "build/python"
+wheel.packages = ["python/moba"]
+cmake.args = ["-DMOBA_SIM_BUILD_TESTS=OFF"]
+
+[tool.pytest.ini_options]
+testpaths = ["python/tests"]

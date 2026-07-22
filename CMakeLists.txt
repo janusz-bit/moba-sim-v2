@@ -14,8 +14,13 @@ endif()
 
 add_subdirectory(src)
 
-option(MOBA_SIM_BUILD_TESTS "Build tests" ON)
+option(MOBA_SIM_BUILD_TESTS "Build C++ tests" ON)
 if(MOBA_SIM_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
+endif()
+
+option(MOBA_SIM_BUILD_PYTHON "Build Python bindings" OFF)
+if(MOBA_SIM_BUILD_PYTHON)
+  add_subdirectory(python)
 endif()
