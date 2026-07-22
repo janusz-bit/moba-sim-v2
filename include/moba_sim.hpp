@@ -11,7 +11,6 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
-#include <variant>
 #include <vector>
 
 namespace moba {
@@ -67,35 +66,18 @@ using SourcePtr = std::shared_ptr<Source>;
 struct Source {
   std::string name;
   std::string description;
-  SourcePtr parent; // who/what added this (chainable provenance).
-                    // nullptr = root source.
+  SourcePtr parent; // chainable provenance; nullptr = root
 
   Source(std::string n = {}, std::string d = {}, SourcePtr p = {})
       : name(std::move(n)), description(std::move(d)), parent(std::move(p)) {}
 
   // Convenience: 3rd arg as string → creates a root parent with that name.
-  // Enables backward-compatible Source{"Item", "Bloodthirster", "attacker"}.
   Source(std::string n, std::string d, std::string origin_name)
       : name(std::move(n)), description(std::move(d)),
         parent(origin_name.empty()
                    ? SourcePtr{}
                    : std::make_shared<Source>(std::move(origin_name))) {}
 
-  // Backward-compatible initializer_list constructor.
-  // {"name", "desc", "origin"} → parent = make_shared<Source>("origin")
-  Source(std::initializer_list<std::string> list) {
-    const auto *it = list.begin();
-    name = (it != list.end()) ? *it++ : std::string{};
-    description = (it != list.end()) ? *it++ : std::string{};
-    if (it != list.end()) {
-      std::string origin_name = *it++;
-      if (!origin_name.empty()) {
-        parent = std::make_shared<Source>(std::move(origin_name));
-      }
-    }
-  }
-
-  // Walk the chain: returns the origin (root parent's name), or "" if none.
   [[nodiscard]] std::string origin() const {
     return parent ? parent->name : std::string{};
   }
@@ -285,20 +267,6 @@ struct Champion {
                                     Type flat_pen = 0.0,
                                     Type pct_pen = 0.0) noexcept;
 
-// Lifesteal healing from post-mitigation damage. Life steal applies to basic
-// damage; omnivamp applies to all damage types. Returns the heal amount.
-// See: https://wiki.leagueoflegends.com/en-us/Life_steal
-[[nodiscard]] Type lifesteal_heal(Type post_mitigated,
-                                  Type lifesteal_pct) noexcept;
-[[nodiscard]] Type omnivamp_heal(Type post_mitigated,
-                                 Type omnivamp_pct) noexcept;
-
-// Effective crowd control duration after tenacity reduction. Capped at 0.3s
-// minimum (per LoL Wiki). Tenacity is 0.0–1.0.
-// See: https://wiki.leagueoflegends.com/en-us/Tenacity
-[[nodiscard]] Type effective_cc_duration(Type raw_duration,
-                                         Type tenacity) noexcept;
-
 // Apply damage to shield first, then CurrentHP. Returns remaining shield and
 // HP after absorption. Shield absorbs all damage types (normal shield per LoL
 // Wiki). Resistance mitigation is applied BEFORE the shield absorbs.
@@ -309,11 +277,6 @@ struct DamageAfterShield {
 };
 [[nodiscard]] DamageAfterShield
 apply_damage_to_shield(Type shield, Type current_hp, Type mitigated) noexcept;
-
-// Amplify a heal or shield amount by HealShieldPower. Returns the amplified
-// value. HealShieldPower is 0.0–1.0 (e.g. 0.15 = +15%).
-[[nodiscard]] Type amplified_heal(Type base_heal,
-                                  Type heal_shield_power) noexcept;
 
 // Convenience accessors for Stats indexed by Stat enum.
 [[nodiscard]] inline Type getStat(const Champion::Stats &stats, Stat stat) {

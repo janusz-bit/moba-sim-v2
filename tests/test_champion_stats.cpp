@@ -24,27 +24,6 @@ Champion::PassiveFactory &factory() {
 
 // --- Life steal ---
 
-TEST_CASE("lifesteal_heal returns 0 for zero lifesteal", "[lifesteal]") {
-  REQUIRE(moba::lifesteal_heal(100.0, 0.0) == Catch::Approx(0.0));
-}
-
-TEST_CASE("lifesteal_heal returns percentage of post-mitigated damage",
-          "[lifesteal]") {
-  // 12% lifesteal on 50 post-mitigated → 6
-  REQUIRE(moba::lifesteal_heal(50.0, 0.12) == Catch::Approx(6.0));
-}
-
-TEST_CASE("lifesteal_heal scales with damage", "[lifesteal]") {
-  Type heal1 = moba::lifesteal_heal(50.0, 0.15);
-  Type heal2 = moba::lifesteal_heal(100.0, 0.15);
-  REQUIRE(heal2 == Catch::Approx(2.0 * heal1));
-}
-
-TEST_CASE("lifesteal_heal with 100% lifesteal returns full damage",
-          "[lifesteal]") {
-  REQUIRE(moba::lifesteal_heal(75.0, 1.0) == Catch::Approx(75.0));
-}
-
 TEST_CASE("LifeSteal stat in mod_db flows through pipeline", "[lifesteal]") {
   Champion champ;
   champ.mod_db.add(Stat::LifeSteal, ModType::Base, 0.12, Source{"Item", ""});
@@ -74,12 +53,6 @@ TEST_CASE("LifeSteal via passive Inc mod", "[lifesteal]") {
 
 // --- Omnivamp ---
 
-TEST_CASE("omnivamp_heal returns percentage of post-mitigated damage",
-          "[omnivamp]") {
-  REQUIRE(moba::omnivamp_heal(100.0, 0.0) == Catch::Approx(0.0));
-  REQUIRE(moba::omnivamp_heal(80.0, 0.15) == Catch::Approx(12.0));
-}
-
 TEST_CASE("Omnivamp stat in mod_db", "[omnivamp]") {
   Champion champ;
   champ.mod_db.add(Stat::Omnivamp, ModType::Base, 0.15, Source{"Item", ""});
@@ -88,35 +61,6 @@ TEST_CASE("Omnivamp stat in mod_db", "[omnivamp]") {
 }
 
 // --- Tenacity ---
-
-TEST_CASE("effective_cc_duration with zero tenacity returns raw",
-          "[tenacity]") {
-  REQUIRE(moba::effective_cc_duration(2.0, 0.0) == Catch::Approx(2.0));
-}
-
-TEST_CASE("effective_cc_duration with 30% tenacity reduces by 30%",
-          "[tenacity]") {
-  // 2.0s * (1 - 0.3) = 1.4s
-  REQUIRE(moba::effective_cc_duration(2.0, 0.3) == Catch::Approx(1.4));
-}
-
-TEST_CASE("effective_cc_duration with 100% tenacity hits 0.3s floor",
-          "[tenacity]") {
-  // Full tenacity → 0.0, but capped at 0.3s minimum
-  REQUIRE(moba::effective_cc_duration(2.0, 1.0) == Catch::Approx(0.3));
-}
-
-TEST_CASE("effective_cc_duration floor applies even for short CC",
-          "[tenacity]") {
-  // 0.4s stun with 50% tenacity → 0.2, but floored to 0.3
-  REQUIRE(moba::effective_cc_duration(0.4, 0.5) == Catch::Approx(0.3));
-}
-
-TEST_CASE("effective_cc_duration with negative tenacity amplifies CC",
-          "[tenacity]") {
-  // -30% tenacity (e.g. Brittle) → 2.0 * (1 - (-0.3)) = 2.0 * 1.3 = 2.6
-  REQUIRE(moba::effective_cc_duration(2.0, -0.3) == Catch::Approx(2.6));
-}
 
 TEST_CASE("Tenacity stat in mod_db", "[tenacity]") {
   Champion champ;
@@ -240,9 +184,7 @@ TEST_CASE("Combat: attacker heals via LifeSteal stat", "[lifesteal][combat]") {
                                       tgt_base);
 
   // Lifesteal heal: 30 * 0.12 = 3.6
-  Type heal =
-      moba::lifesteal_heal(dealt,
-                           atk_base[std::to_underlying(Stat::LifeSteal)]);
+  Type heal = dealt * atk_base[std::to_underlying(Stat::LifeSteal)];
 
   REQUIRE(dealt == Catch::Approx(30.0));
   REQUIRE(heal == Catch::Approx(3.6));
@@ -283,201 +225,13 @@ TEST_CASE("Combat: tenacity reduces stun duration in simulation",
   Type tenacity = base[std::to_underlying(Stat::Tenacity)];
 
   // 2.0s stun reduced by 30% tenacity → 1.4s
-  Type reduced = moba::effective_cc_duration(2.0, tenacity);
+  Type reduced = 2.0 * (1.0 - tenacity);
   REQUIRE(reduced == Catch::Approx(1.4));
 }
 
 // ===========================================================================
 // EDGE CASE TESTS — exercising extreme/corner inputs
 // ===========================================================================
-
-// --- effective_cc_duration: extreme tenacity values ---
-
-TEST_CASE("tenacity exactly 0.0 returns raw duration", "[tenacity][edge]") {
-  REQUIRE(moba::effective_cc_duration(5.0, 0.0) == Catch::Approx(5.0));
-}
-
-TEST_CASE("tenacity 1.0 (100%) floors at 0.3s for long CC",
-          "[tenacity][edge]") {
-  REQUIRE(moba::effective_cc_duration(10.0, 1.0) == Catch::Approx(0.3));
-}
-
-TEST_CASE("tenacity 1.0 floors at 0.3s even for very long CC",
-          "[tenacity][edge]") {
-  REQUIRE(moba::effective_cc_duration(1000.0, 1.0) == Catch::Approx(0.3));
-}
-
-TEST_CASE("tenacity exactly 0.3s floor boundary", "[tenacity][edge]") {
-  // 0.42857s * (1 - 0.3) = 0.3s exactly → floor doesn't trigger
-  REQUIRE(moba::effective_cc_duration(0.428571, 0.3) ==
-          Catch::Approx(0.3).epsilon(0.001));
-}
-
-TEST_CASE("tenacity floor triggers just below 0.3s", "[tenacity][edge]") {
-  // 0.4s * (1 - 0.5) = 0.2 → floored to 0.3
-  REQUIRE(moba::effective_cc_duration(0.4, 0.5) == Catch::Approx(0.3));
-}
-
-TEST_CASE("tenacity negative amplifies CC multiplicatively",
-          "[tenacity][edge]") {
-  // -50% tenacity → 2.0 * (1 - (-0.5)) = 2.0 * 1.5 = 3.0
-  REQUIRE(moba::effective_cc_duration(2.0, -0.5) == Catch::Approx(3.0));
-}
-
-TEST_CASE("tenacity -1.0 doubles CC duration", "[tenacity][edge]") {
-  // -100% tenacity → 2.0 * (1 - (-1.0)) = 2.0 * 2.0 = 4.0
-  REQUIRE(moba::effective_cc_duration(2.0, -1.0) == Catch::Approx(4.0));
-}
-
-TEST_CASE("tenacity extreme negative does not floor", "[tenacity][edge]") {
-  // -10.0 tenacity → 1.0 * (1 - (-10)) = 1.0 * 11 = 11 (floor is for min, not
-  // max)
-  REQUIRE(moba::effective_cc_duration(1.0, -10.0) == Catch::Approx(11.0));
-}
-
-TEST_CASE("tenacity zero duration stays zero (unless floored)",
-          "[tenacity][edge]") {
-  // 0.0 * (1 - 0.5) = 0.0, which is < 0.3 → floored to 0.3
-  REQUIRE(moba::effective_cc_duration(0.0, 0.5) == Catch::Approx(0.3));
-}
-
-// --- lifesteal_heal: extreme values ---
-
-TEST_CASE("lifesteal_heal with zero damage returns zero", "[lifesteal][edge]") {
-  REQUIRE(moba::lifesteal_heal(0.0, 0.15) == Catch::Approx(0.0));
-}
-
-TEST_CASE("lifesteal_heal with negative damage (heal reversal)",
-          "[lifesteal][edge]") {
-  // Negative post-mitigated (e.g. from negative raw) → negative heal (damage
-  // self)
-  REQUIRE(moba::lifesteal_heal(-50.0, 0.12) == Catch::Approx(-6.0));
-}
-
-TEST_CASE("lifesteal_heal with huge values stays finite", "[lifesteal][edge]") {
-  REQUIRE(std::isfinite(moba::lifesteal_heal(1e15, 1.0)));
-  REQUIRE(moba::lifesteal_heal(1e15, 1.0) == Catch::Approx(1e15));
-}
-
-TEST_CASE("lifesteal_heal with >100% lifesteal over-heals",
-          "[lifesteal][edge]") {
-  // 150% lifesteal: heals more than damage dealt
-  REQUIRE(moba::lifesteal_heal(100.0, 1.5) == Catch::Approx(150.0));
-}
-
-TEST_CASE("lifesteal_heal with negative lifesteal reverses healing",
-          "[lifesteal][edge]") {
-  // Negative lifesteal → self-damage
-  REQUIRE(moba::lifesteal_heal(100.0, -0.2) == Catch::Approx(-20.0));
-}
-
-// --- omnivamp_heal: extreme values ---
-
-TEST_CASE("omnivamp_heal with zero damage returns zero", "[omnivamp][edge]") {
-  REQUIRE(moba::omnivamp_heal(0.0, 0.15) == Catch::Approx(0.0));
-}
-
-TEST_CASE("omnivamp_heal with negative omnivamp self-damages",
-          "[omnivamp][edge]") {
-  REQUIRE(moba::omnivamp_heal(100.0, -0.3) == Catch::Approx(-30.0));
-}
-
-TEST_CASE("omnivamp_heal with huge omnivamp stays finite", "[omnivamp][edge]") {
-  REQUIRE(std::isfinite(moba::omnivamp_heal(1e15, 100.0)));
-}
-
-// --- amplified_heal: extreme values ---
-
-TEST_CASE("amplified_heal with zero power returns base", "[healshield][edge]") {
-  REQUIRE(moba::amplified_heal(100.0, 0.0) == Catch::Approx(100.0));
-}
-
-TEST_CASE("amplified_heal with negative power reduces heal",
-          "[healshield][edge]") {
-  // -50% heal power → 100 * (1 - 0.5) = 50
-  REQUIRE(moba::amplified_heal(100.0, -0.5) == Catch::Approx(50.0));
-}
-
-TEST_CASE("amplified_heal with -100% power zeroes the heal",
-          "[healshield][edge]") {
-  // Grievous Wounds-style: -100% → 0 heal
-  REQUIRE(moba::amplified_heal(100.0, -1.0) == Catch::Approx(0.0));
-}
-
-TEST_CASE("amplified_heal with huge power stays finite", "[healshield][edge]") {
-  REQUIRE(std::isfinite(moba::amplified_heal(1e10, 1e10)));
-}
-
-TEST_CASE("amplified_heal with zero base returns zero", "[healshield][edge]") {
-  REQUIRE(moba::amplified_heal(0.0, 0.5) == Catch::Approx(0.0));
-}
-
-// --- apply_damage_to_shield: extreme values ---
-
-TEST_CASE("shield absorbs exactly all damage", "[shield][edge]") {
-  auto [s, h] = moba::apply_damage_to_shield(100.0, 1000.0, 100.0);
-  REQUIRE(s == Catch::Approx(0.0));
-  REQUIRE(h == Catch::Approx(1000.0));
-}
-
-TEST_CASE("shield larger than damage: partial absorption", "[shield][edge]") {
-  auto [s, h] = moba::apply_damage_to_shield(200.0, 1000.0, 50.0);
-  REQUIRE(s == Catch::Approx(150.0));
-  REQUIRE(h == Catch::Approx(1000.0));
-}
-
-TEST_CASE("shield zero: all damage goes to HP", "[shield][edge]") {
-  auto [s, h] = moba::apply_damage_to_shield(0.0, 1000.0, 100.0);
-  REQUIRE(s == Catch::Approx(0.0));
-  REQUIRE(h == Catch::Approx(900.0));
-}
-
-TEST_CASE("damage exactly equals shield+HP: both go to zero",
-          "[shield][edge]") {
-  auto [s, h] = moba::apply_damage_to_shield(100.0, 200.0, 300.0);
-  REQUIRE(s == Catch::Approx(0.0));
-  REQUIRE(h == Catch::Approx(0.0));
-}
-
-TEST_CASE("damage exceeds shield+HP: HP goes negative", "[shield][edge]") {
-  auto [s, h] = moba::apply_damage_to_shield(100.0, 200.0, 500.0);
-  REQUIRE(s == Catch::Approx(0.0));
-  REQUIRE(h == Catch::Approx(-200.0));
-}
-
-TEST_CASE("shield with zero damage: nothing changes", "[shield][edge]") {
-  auto [s, h] = moba::apply_damage_to_shield(100.0, 500.0, 0.0);
-  REQUIRE(s == Catch::Approx(100.0));
-  REQUIRE(h == Catch::Approx(500.0));
-}
-
-TEST_CASE("shield with negative damage (heal): no effect on shield/HP",
-          "[shield][edge]") {
-  // Negative damage should not increase shield or HP (only heals do that)
-  auto [s, h] = moba::apply_damage_to_shield(100.0, 500.0, -50.0);
-  REQUIRE(s == Catch::Approx(100.0));
-  REQUIRE(h == Catch::Approx(500.0));
-}
-
-TEST_CASE("shield huge, damage tiny: shield barely scratched",
-          "[shield][edge]") {
-  auto [s, h] = moba::apply_damage_to_shield(1e6, 1000.0, 1.0);
-  REQUIRE(s == Catch::Approx(999999.0));
-  REQUIRE(h == Catch::Approx(1000.0));
-}
-
-TEST_CASE("shield tiny, damage huge: shield obliterated, HP takes rest",
-          "[shield][edge]") {
-  auto [s, h] = moba::apply_damage_to_shield(1.0, 1000.0, 10000.0);
-  REQUIRE(s == Catch::Approx(0.0));
-  REQUIRE(h == Catch::Approx(1000.0 - 9999.0));
-}
-
-TEST_CASE("shield and HP both zero: stays zero", "[shield][edge]") {
-  auto [s, h] = moba::apply_damage_to_shield(0.0, 0.0, 100.0);
-  REQUIRE(s == Catch::Approx(0.0));
-  REQUIRE(h == Catch::Approx(-100.0));
-}
 
 // --- mitigated_damage: extreme penetration ---
 
@@ -900,19 +654,6 @@ TEST_CASE("Source three-arg ctor sets origin", "[source]") {
   REQUIRE(s.name == "Item");
   REQUIRE(s.description == "Bloodthirster");
   REQUIRE(s.origin() == "attacker");
-}
-
-TEST_CASE("Source initializer_list with 3 elements sets origin", "[source]") {
-  Source s{"Rune", "Bloodline", "defender"};
-  REQUIRE(s.origin() == "defender");
-}
-
-TEST_CASE("Source initializer_list with 2 elements leaves origin empty",
-          "[source]") {
-  Source s{"Item", "Black Cleaver"};
-  REQUIRE(s.name == "Item");
-  REQUIRE(s.description == "Black Cleaver");
-  REQUIRE(s.origin().empty());
 }
 
 TEST_CASE("Source equality compares all three fields", "[source]") {

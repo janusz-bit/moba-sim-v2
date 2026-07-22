@@ -219,19 +219,6 @@ Type mitigated_damage(Type raw_damage, TypeDamage type,
   return post_mitigation_damage(raw_damage, res);
 }
 
-Type lifesteal_heal(Type post_mitigated, Type lifesteal_pct) noexcept {
-  return post_mitigated * lifesteal_pct;
-}
-
-Type omnivamp_heal(Type post_mitigated, Type omnivamp_pct) noexcept {
-  return post_mitigated * omnivamp_pct;
-}
-
-Type effective_cc_duration(Type raw_duration, Type tenacity) noexcept {
-  Type effective = raw_duration * (1.0 - tenacity);
-  return (effective < 0.3) ? 0.3 : effective;
-}
-
 DamageAfterShield apply_damage_to_shield(Type shield, Type current_hp,
                                          Type mitigated) noexcept {
   if (mitigated <= 0.0) {
@@ -242,10 +229,6 @@ DamageAfterShield apply_damage_to_shield(Type shield, Type current_hp,
   }
   return {.shield_remaining = 0.0,
           .hp_remaining = current_hp - (mitigated - shield)};
-}
-
-Type amplified_heal(Type base_heal, Type heal_shield_power) noexcept {
-  return base_heal * (1.0 + heal_shield_power);
 }
 
 void Simulation::processEvents(Type eps, std::size_t max_iter) {

@@ -211,12 +211,8 @@ c.addPassive(factory.make(PassiveId::Burn, make_burn(0.0, 3.0)));   // insert
 c.addPassive(factory.make(PassiveId::Burn, make_burn(5.0, 5.0))); // refresh
 ```
 
-## Damage as a passive
-
-Damage fits the passive model without extending the type system: a passive
-returns a negative `Base` mod for `CurrentHP` to reduce the target's HP. Use
-the `mitigated_damage` helper to apply penetration and resistance mitigation
-before turning raw damage into a passive mod.
+To deal damage, use `mitigated_damage` to compute post-mitigation amount, then
+apply it as a negative `Base` mod for `CurrentHP`:
 
 ```cpp
 Champion target{{Stat::MaxHP, 1000}, {Stat::CurrentHP, 1000}, {Stat::AR, 100}};

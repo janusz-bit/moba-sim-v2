@@ -157,8 +157,7 @@ TEST_CASE("Lifesteal passive emits HealApplied on DamageDealt", "[events]") {
           -> Champion::PassiveResult {
         if (ev.kind != EventKind::DamageDealt)
           return {};
-        Type heal =
-            moba::lifesteal_heal(ev.amount, getStat(final, Stat::LifeSteal));
+        Type heal = ev.amount * getStat(final, Stat::LifeSteal);
         return {{},
                 true,
                 {{EventKind::HealApplied,

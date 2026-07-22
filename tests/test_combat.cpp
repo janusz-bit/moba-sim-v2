@@ -472,7 +472,7 @@ TEST_CASE("Combat: ultimate 2-champion duel — all mechanics",
   // 3b. Bruiser casts shield on self: 200 base * (1 + 0.15 HealShieldPower)
   //     = 230 shield
   Type shield_power = bruiser_base[std::to_underlying(Stat::HealShieldPower)];
-  Type shield_amount = moba::amplified_heal(200.0, shield_power);
+  Type shield_amount = 200.0 * (1.0 + shield_power);
   REQUIRE(shield_amount == Catch::Approx(230.0));
 
   // Apply shield to bruiser as a passive mod
@@ -514,7 +514,7 @@ TEST_CASE("Combat: ultimate 2-champion duel — all mechanics",
 
   // Bruiser omnivamp heals from spell: 111.11 * 0.12 = 13.33
   Type omnivamp = bruiser_base[std::to_underlying(Stat::Omnivamp)];
-  Type bruiser_heal = moba::omnivamp_heal(spell_dealt, omnivamp);
+  Type bruiser_heal = spell_dealt * omnivamp;
   REQUIRE(bruiser_heal == Catch::Approx(13.33).epsilon(0.1));
 
   // Apply spell damage to ADC
@@ -525,7 +525,7 @@ TEST_CASE("Combat: ultimate 2-champion duel — all mechanics",
 
   // ADC lifesteal heals from auto-attack: 272.4 * 0.15 = 40.86
   Type ls = adc_base[std::to_underlying(Stat::LifeSteal)];
-  Type adc_heal = moba::lifesteal_heal(aa_dealt, ls);
+  Type adc_heal = aa_dealt * ls;
   REQUIRE(adc_heal == Catch::Approx(40.86).epsilon(0.1));
 
   // Apply ADC lifesteal heal
@@ -596,7 +596,8 @@ TEST_CASE("Combat: ultimate 2-champion duel — all mechanics",
       adc.evaluateChampion(0.001,
                            1000,
                            4.0)[std::to_underlying(Stat::Tenacity)];
-  Type stun_duration = moba::effective_cc_duration(1.5, adc_tenacity);
+  // 1.5s stun with 0 tenacity → 1.5 * (1 - 0) = 1.5
+  Type stun_duration = 1.5 * (1.0 - adc_tenacity);
   REQUIRE(stun_duration == Catch::Approx(1.5)); // 0 tenacity → no reduction
 
   // Bruiser catches up: spell hits ADC for 200 magic damage
