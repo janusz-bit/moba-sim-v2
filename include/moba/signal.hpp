@@ -43,6 +43,10 @@ public:
     }
   }
 
+  // Drop all subscribers. Call this before destruction to break reference
+  // cycles (e.g. Python callbacks capturing the Simulation).
+  void clear() { listeners_.clear(); }
+
 private:
   struct Listener {
     ListenerID id;

@@ -371,6 +371,10 @@ NB_MODULE(moba_ext, m) {
   nb::class_<Simulation>(m, "Simulation")
       .def(nb::init<>())
       .def(
+          "__del__",
+          [](Simulation &sim) { sim.clearSignals(); },
+          "Break reference cycles before destruction")
+      .def(
           "add_champion",
           [](Simulation &sim, const Champion &c) {
             sim.champions.push_back(c);
@@ -445,6 +449,9 @@ NB_MODULE(moba_ext, m) {
           nb::arg("amount"),
           nb::arg("source") = Source{},
           nb::arg("time") = 0.0)
+      .def("clear_signals",
+           &Simulation::clearSignals,
+           "Drop all signal subscribers to break reference cycles")
       .def("evaluate_all",
            &Simulation::evaluateAll,
            nb::arg("eps") = 0.01,

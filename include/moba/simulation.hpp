@@ -34,6 +34,11 @@ struct Simulation {
   Signal<Death> onDeath;
 
   Simulation();
+  ~Simulation();
+
+  // Drop all signal subscribers (internal handlers + user callbacks).
+  // Call this to break reference cycles before destruction.
+  void clearSignals();
 
   // Convenience: re-evaluate all champions with passives (fixed-point).
   void evaluateAll(Type eps = 0.01, std::size_t max_iter = 10000);

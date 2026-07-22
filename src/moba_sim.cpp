@@ -239,6 +239,16 @@ void Simulation::evaluateAll(Type eps, std::size_t max_iter) {
   }
 }
 
+Simulation::~Simulation() { clearSignals(); }
+
+void Simulation::clearSignals() {
+  onAttackHit.clear();
+  onDamageDealt.clear();
+  onDamageReceived.clear();
+  onHealApplied.clear();
+  onDeath.clear();
+}
+
 Simulation::Simulation() {
   // AttackHit -> compute mitigated damage -> emit DamageReceived + DamageDealt
   onAttackHit.subscribe([this](const AttackHit &ev) {

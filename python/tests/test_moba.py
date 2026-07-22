@@ -98,82 +98,94 @@ def test_apply_damage_to_shield_overflow():
 
 def test_attack_hit_deals_damage():
     sim = Simulation()
-    sim.add_champion(
-        Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 1000, Stat.AD: 100})
-    )
-    sim.add_champion(
-        Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 1000, Stat.AR: 100})
-    )
+    try:
+        sim.add_champion(
+            Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 1000, Stat.AD: 100})
+        )
+        sim.add_champion(
+            Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 1000, Stat.AR: 100})
+        )
 
-    sim.emit_attack_hit(0, 1, 100.0, TypeDamage.Physical,
-                        Source("Basic attack"), 0.0)
+        sim.emit_attack_hit(0, 1, 100.0, TypeDamage.Physical,
+                            Source("Basic attack"), 0.0)
 
-    target = sim.get_champion(1).get_base_stats()
-    assert target[Stat.CurrentHP] == pytest.approx(950.0)
+        target = sim.get_champion(1).get_base_stats()
+        assert target[Stat.CurrentHP] == pytest.approx(950.0)
+    finally:
+        sim.clear_signals()
 
 
 def test_lifesteal_via_signal():
     sim = Simulation()
-    sim.add_champion(
-        Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 800,
-                  Stat.AD: 100, Stat.LifeSteal: 0.12})
-    )
-    sim.add_champion(
-        Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 1000, Stat.AR: 100})
-    )
+    try:
+        sim.add_champion(
+            Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 800,
+                      Stat.AD: 100, Stat.LifeSteal: 0.12})
+        )
+        sim.add_champion(
+            Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 1000, Stat.AR: 100})
+        )
 
-    def lifesteal(ev):
-        atk = sim.get_champion(ev.actor_id).get_base_stats()
-        heal = ev.amount * atk[Stat.LifeSteal]
-        sim.emit_heal_applied(ev.actor_id, heal, Source("Lifesteal"), ev.time)
+        def lifesteal(ev):
+            atk = sim.get_champion(ev.actor_id).get_base_stats()
+            heal = ev.amount * atk[Stat.LifeSteal]
+            sim.emit_heal_applied(ev.actor_id, heal, Source("Lifesteal"), ev.time)
 
-    sim.on_damage_dealt_subscribe(lifesteal)
+        sim.on_damage_dealt_subscribe(lifesteal)
 
-    sim.emit_attack_hit(0, 1, 100.0, TypeDamage.Physical,
-                        Source("Basic attack"), 0.0)
+        sim.emit_attack_hit(0, 1, 100.0, TypeDamage.Physical,
+                            Source("Basic attack"), 0.0)
 
-    atk = sim.get_champion(0).get_base_stats()
-    assert atk[Stat.CurrentHP] == pytest.approx(806.0)  # 800 + 6 (50 * 0.12)
-    tgt = sim.get_champion(1).get_base_stats()
-    assert tgt[Stat.CurrentHP] == pytest.approx(950.0)
+        atk = sim.get_champion(0).get_base_stats()
+        assert atk[Stat.CurrentHP] == pytest.approx(806.0)  # 800 + 6 (50 * 0.12)
+        tgt = sim.get_champion(1).get_base_stats()
+        assert tgt[Stat.CurrentHP] == pytest.approx(950.0)
+    finally:
+        sim.clear_signals()
 
 
 def test_death_event_fires():
     sim = Simulation()
-    sim.add_champion(
-        Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 1000, Stat.AD: 999})
-    )
-    sim.add_champion(
-        Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 100})
-    )
+    try:
+        sim.add_champion(
+            Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 1000, Stat.AD: 999})
+        )
+        sim.add_champion(
+            Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 100})
+        )
 
-    death_seen = []
+        death_seen = []
 
-    def on_death(ev):
-        death_seen.append(ev)
+        def on_death(ev):
+            death_seen.append(ev)
 
-    sim.on_death_subscribe(on_death)
+        sim.on_death_subscribe(on_death)
 
-    sim.emit_attack_hit(0, 1, 999.0, TypeDamage.True_, Source("Execute"), 0.0)
+        sim.emit_attack_hit(0, 1, 999.0, TypeDamage.True_, Source("Execute"), 0.0)
 
-    assert len(death_seen) == 1
-    assert death_seen[0].target_id == 1
-    assert death_seen[0].actor_id == 0
+        assert len(death_seen) == 1
+        assert death_seen[0].target_id == 1
+        assert death_seen[0].actor_id == 0
+    finally:
+        sim.clear_signals()
 
 
 def test_true_damage_bypasses_mitigation():
     sim = Simulation()
-    sim.add_champion(
-        Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 1000, Stat.AD: 100})
-    )
-    sim.add_champion(
-        Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 1000, Stat.AR: 500})
-    )
+    try:
+        sim.add_champion(
+            Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 1000, Stat.AD: 100})
+        )
+        sim.add_champion(
+            Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 1000, Stat.AR: 500})
+        )
 
-    sim.emit_attack_hit(0, 1, 100.0, TypeDamage.True_, Source("True"), 0.0)
+        sim.emit_attack_hit(0, 1, 100.0, TypeDamage.True_, Source("True"), 0.0)
 
-    t = sim.get_champion(1).get_base_stats()
-    assert t[Stat.CurrentHP] == pytest.approx(900.0)
+        t = sim.get_champion(1).get_base_stats()
+        assert t[Stat.CurrentHP] == pytest.approx(900.0)
+    finally:
+        sim.clear_signals()
 
 
 # --- Source chain ---
