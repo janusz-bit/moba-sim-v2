@@ -2,13 +2,14 @@
 
 A C++23 library for simulating MOBA-style champion stat aggregation, inspired by
 [League of Legends](https://wiki.leagueoflegends.com/). Models the
-Base/Inc/More modifier pipeline used to compute final stats from items, buffs,
-and passives.
+Base/Inc/More modifier pipeline, passive effects, and a signal-based event
+system for cross-champion combat. Includes Python bindings via [nanobind](https://github.com/wjakob/nanobind).
 
 ## Build
 
 Requires [Nix](https://nixos.org/) with flakes enabled. The development shell
-provides the toolchain (clang, CMake, Catch2) and pre-commit hooks.
+provides the toolchain (clang, CMake, Catch2, nanobind, numpy, pytest) and
+pre-commit hooks.
 
 ```sh
 nix develop
@@ -16,12 +17,22 @@ cmake -B build
 cmake --build build
 ```
 
-## Test
-
-Tests use [Catch2 v3](https://github.com/catchorg/Catch2), wired through CTest.
+### Python bindings
 
 ```sh
-ctest --test-dir build
+cmake -B build -DMOBA_SIM_BUILD_PYTHON=ON
+cmake --build build --target moba_ext
+PYTHONPATH=python python3 -c "from moba import Champion, Stat; print('ok')"
+```
+
+## Test
+
+C++ tests use [Catch2 v3](https://github.com/catchorg/Catch2), wired through CTest.
+Python tests use pytest.
+
+```sh
+ctest --test-dir build                                    # C++ (216 tests)
+PYTHONPATH=python python3 -m pytest python/tests/         # Python (17 tests)
 ```
 
 ## Nix
@@ -33,17 +44,31 @@ ctest --test-dir build
 | `nix flake check`    | Run pre-commit hooks + build & run tests            |
 | `pre-commit run -a`  | Run linters/formatters manually (inside dev shell)  |
 
-The package installs `include/moba_sim.hpp` and `lib/libmoba_sim.a`. Tests are
-gated behind the `MOBA_SIM_BUILD_TESTS` CMake option (ON by default, OFF when
-built as a package).
+The package installs `include/moba_sim.hpp` (umbrella) and `lib/libmoba_sim.a`.
+Tests are gated behind `MOBA_SIM_BUILD_TESTS` (ON by default, OFF when packaged).
+Python bindings are gated behind `MOBA_SIM_BUILD_PYTHON` (OFF by default).
 
 ## Project layout
 
 ```
-include/moba_sim.hpp   Public API: Stat, ModType, ModDB, Champion, passives
-src/moba_sim.cpp       Implementation
-tests/                 Catch2 test suite (one file per component)
-nix/default.nix        Flake module: devShell, pre-commit hooks, package, checks
+include/
+  moba_sim.hpp              Umbrella header (includes all sub-headers)
+  moba/
+    types.hpp               Type, Stat, ModType, TypeDamage, ConvergenceError
+    source.hpp              Source (provenance chain)
+    mod_db.hpp              Modifier, ModDB
+    event.hpp               Typed event structs (AttackHit, DamageReceived, ...)
+    signal.hpp              Signal<Args...> (typed pub-sub)
+    champion.hpp            Champion, Passive, PassiveResult, PassiveFactory
+    combat.hpp              mitigated_damage, apply_damage_to_shield, getStat
+    simulation.hpp          Simulation (signals + internal handlers)
+src/moba_sim.cpp            Implementation
+python/
+  moba_sim_ext.cpp          nanobind bindings (high-level API)
+  moba/__init__.py          Python package
+  tests/test_moba.py        pytest suite
+tests/                      Catch2 test suite (one file per component)
+nix/default.nix             Flake module: devShell, pre-commit, package, checks
 ```
 
 ## Stat model
@@ -59,7 +84,7 @@ A stat's final value combines three modifier types:
 ## Champion pipeline
 
 ```
-mod_db (modifiers)  →  getBaseStats()  →  passives  →  final
+mod_db (modifiers)  ->  getBaseStats()  ->  passives  ->  final
 ```
 
 `Champion::getBaseStats()` reads from `mod_db` and returns the array of all
@@ -90,91 +115,53 @@ A passive **is the sole authority on its lifetime** via the `alive` flag:
   a start time and checking `time - start < duration`)
 
 All passives live in a single `passives` queue of `PassiveEntry` (id + passive).
-Use `Champion::PassiveFactory::make()` to create entries with unique ids, and
-`Champion::addPassive()` to insert — inserting an entry whose id already exists
-**replaces** the existing passive (refresh), otherwise a new entry is appended.
-The framework treats passives uniformly: call, fold mods into `mod_db`, remove
-if `alive=false`. A passive may capture a `start_time` and `duration`, reset
-itself, or change its effect — the framework knows nothing about
-time/counters/handles; the passive is a black box with access to `time`.
+Use `Champion::PassiveFactory::make()` to create entries with auto-incremented
+ids, and `Champion::addPassive()` to insert — inserting an entry whose id
+already exists **replaces** the existing passive (refresh), otherwise a new
+entry is appended.
 
-## `addPassive(entry)` — insert or refresh
+## Event system
 
-Passives are identified by a **type-safe enum id**. Define your own `PassiveId`
-enum with one value per named passive slot. `addPassive` deduplicates by id:
-same id = refresh (replace), new id = append.
+Events are typed structs (`AttackHit`, `DamageDealt`, `DamageReceived`,
+`HealApplied`, `Death`), each carrying event-specific fields. `Simulation`
+owns one `Signal<EventType>` per event type. The constructor wires internal
+handlers that implement the core rules:
+
+```
+AttackHit      -> mitigated_damage -> emit DamageReceived + DamageDealt
+DamageReceived -> HP loss (shield absorbs) -> emit Death if HP <= 0
+HealApplied    -> HP gain (cap MaxHP)
+```
+
+User code subscribes to the same signals to react or chain new events:
 
 ```cpp
-enum class PassiveId : std::size_t { Burn, Shield, Shred };
-
-Champion::PassiveFactory factory;
-champ.addPassive(factory.make(PassiveId::Burn, make_burn(0.0, 3.0)));
-// later, refresh burn with a new start time (same id → replaces):
-champ.addPassive(factory.make(PassiveId::Burn, make_burn(5.0, 5.0)));
+sim.onDamageDealt.subscribe([&](const DamageDealt &ev) {
+  auto atk = sim.champions[ev.actor_id].getBaseStats();
+  Type heal = ev.amount * getStat(atk, Stat::LifeSteal);
+  sim.onHealApplied.emit({ev.actor_id, heal, Source{"Lifesteal"}, ev.time});
+});
+sim.onAttackHit.emit({0, 1, 100.0, TypeDamage::Physical, Source{"Auto"}, 0.0});
 ```
 
-## `applyPassives(base, final, time)` — one simulation step
-
-Applies all passives in a single step:
-
-1. For each passive: call it, fold its mods into a copy of `mod_db`.
-2. If `alive=false`, erase it; the mods are still applied for this step.
-3. Run the full Base/Inc/More pipeline on the resulting `mod_db`.
-
-Returns the stats after the pipeline. Mutates `passives` (removes
-expired/one-shot). The `base` parameter is passed to passives as informational
-input only — the result is computed from `mod_db + passive mods`.
-
-## `evaluateChampion(eps, max_iter, time)` — fixed-point of all passives
-
-Iterates **all passives** to resolve fixed-point interactions, but **does not
-remove** any during iteration — passives are applied repeatedly with `time`
-(the fixed-point is immediate, not a simulation step). After convergence,
-passives that returned `alive=false` on the final iteration are removed; those
-with `alive=true` stay.
-
-```
-final = getBaseStats()
-repeat:
-  prev = final
-  final = pipeline(mod_db + sum(passive(base, prev, time)))   // no removal
-until delta(final, prev) <= eps  or  iter >= max_iter
-then: remove passives where alive=false (from the final iteration)
-```
-
-Throws `ConvergenceError` if not converged within `max_iter`.
-
-## Usage
+## Usage (C++)
 
 **Static champion** (no time):
 
 ```cpp
-enum class PassiveId : std::size_t { BonusAD };
-
 Champion c{{Stat::MaxHP, 1000}, {Stat::AD, 50}, {Stat::AR, 100}};
 Champion::PassiveFactory factory;
-c.addPassive(factory.make(PassiveId::BonusAD, [](const Stats &, const Stats &, const Type &) {
+c.addPassive(factory.make([](const Stats &, const Stats &, const Type &) {
   return Champion::PassiveResult{
       {{Stat::AD, ModType::Base, 10.0, {}}}, true};  // permanent +10 AD
 }));
 Stats final = c.evaluateChampion();  // fixed-point of all passives
 ```
 
-**Time-based simulation:**
-
-```cpp
-Stats base = c.getBaseStats();
-Stats final = base;
-for (double t = 0.0; t < 10.0; t += dt) {
-  final = c.applyPassives(base, final, t);  // all passives, remove expired
-  // one-shot vanish after 1 step; temp expire when they return alive=false
-}
-```
-
 **Temp passive** (e.g. a burn lasting 3 seconds):
 
 ```cpp
-c.addPassive(factory.make(PassiveId::Burn,
+c.addPassive(factory.make(
     [start = 2.0, duration = 3.0](const Stats &, const Stats &, const Type &time) {
       return Champion::PassiveResult{
           {{Stat::AD, ModType::Base, 10.0, {}}}, time - start < duration};
@@ -184,17 +171,17 @@ c.addPassive(factory.make(PassiveId::Burn,
 **One-shot passive** (e.g. a burst that fires once):
 
 ```cpp
-c.addPassive(factory.make(PassiveId::Burst,
+c.addPassive(factory.make(
     [](const Stats &, const Stats &, const Type &) {
       return Champion::PassiveResult{
-          {{Stat::AD, ModType::Base, 20.0, {}}}, false};  // alive=false → removed
+          {{Stat::AD, ModType::Base, 20.0, {}}}, false};  // alive=false -> removed
     }));
 ```
 
 **Inc/More passive** (e.g. +20% AD as Inc, *1.1 AD as More):
 
 ```cpp
-c.addPassive(factory.make(PassiveId::Rage,
+c.addPassive(factory.make(
     [](const Stats &, const Stats &, const Type &) {
       return Champion::PassiveResult{
           {{Stat::AD, ModType::Inc, 0.2, {}},
@@ -203,25 +190,15 @@ c.addPassive(factory.make(PassiveId::Rage,
     }));
 ```
 
-To refresh a temp effect (e.g. extend burn duration), call `addPassive` again
-with the same enum id but a new passive:
-
-```cpp
-c.addPassive(factory.make(PassiveId::Burn, make_burn(0.0, 3.0)));   // insert
-c.addPassive(factory.make(PassiveId::Burn, make_burn(5.0, 5.0))); // refresh
-```
-
 To deal damage, use `mitigated_damage` to compute post-mitigation amount, then
 apply it as a negative `Base` mod for `CurrentHP`:
 
 ```cpp
 Champion target{{Stat::MaxHP, 1000}, {Stat::CurrentHP, 1000}, {Stat::AR, 100}};
-Champion::PassiveFactory factory;
 
-// 100 physical damage, 0 penetration → 50 post-mitigation
 Type dealt = moba::mitigated_damage(100.0, TypeDamage::Physical,
                                     target.getBaseStats());
-target.addPassive(factory.make(PassiveId::Hit,
+target.addPassive(factory.make(
     [dealt](const Stats &, const Stats &, const Type &) {
       return Champion::PassiveResult{
           {{Stat::CurrentHP, ModType::Base, -dealt, {}}}, false};  // one-shot
@@ -233,10 +210,53 @@ target.evaluateChampion();  // CurrentHP reduced by mitigated damage
   internally; true damage bypasses mitigation.
 - **Penetration** (flat + %): `mitigated_damage(raw, type, target, flat, pct)`
   reduces effective resistance before mitigation.
-- **One-shot**: `alive=false` → removed after applying.
+- **One-shot**: `alive=false` -> removed after applying.
 - **Lifesteal/heal**: a passive returning a positive `Base` mod for `CurrentHP`.
 - **DoT**: a temp passive that accumulates damage in captured state per tick.
 - **Armor shred**: a passive returning a negative `Base` mod for `AR` (debuff).
 
 See `tests/test_combat.cpp` for working examples (trades, penetration, DoT,
 lifesteal, shred, death).
+
+## Usage (Python)
+
+```python
+from moba import Champion, Simulation, Stat, ModType, TypeDamage, Source
+
+# Static champion
+c = Champion({Stat.MaxHP: 1000, Stat.AD: 50, Stat.AR: 100})
+c.add_passive(lambda base, final, time: [(Stat.AD, ModType.Base, 10.0)])
+print(c.evaluate_champion()[Stat.AD])  # 60.0
+
+# One-shot passive (dict result)
+c.add_passive(lambda b, f, t: {"mods": [(Stat.AD, ModType.Base, 25.0)], "alive": False})
+print(c.evaluate_champion()[Stat.AD])  # 85.0, passive consumed
+
+# Simulation with events
+sim = Simulation()
+sim.add_champion(Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 800,
+                          Stat.AD: 100, Stat.LifeSteal: 0.12}))
+sim.add_champion(Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 1000, Stat.AR: 100}))
+
+# Lifesteal: on DamageDealt -> heal attacker
+def lifesteal(ev):
+    atk = sim.get_champion(ev.actor_id).get_base_stats()
+    heal = ev.amount * atk[Stat.LifeSteal]
+    sim.emit_heal_applied(ev.actor_id, heal, Source("Lifesteal"), ev.time)
+
+sim.on_damage_dealt_subscribe(lifesteal)
+sim.emit_attack_hit(0, 1, 100.0, TypeDamage.Physical, Source("Basic attack"), 0.0)
+
+print(sim.get_champion(0).get_base_stats()[Stat.CurrentHP])  # 806.0
+print(sim.get_champion(1).get_base_stats()[Stat.CurrentHP])  # 950.0
+```
+
+- **Stats** are returned as `numpy.ndarray` (float64, shape `[25]`), indexable
+  by `Stat` enum values.
+- **Passives** accept Python callables: `callback(base, final, time) -> list | dict`.
+  List = `[(Stat, ModType, value, [Source]), ...]` (alive=True). Dict =
+  `{"mods": [...], "alive": bool}`.
+- **Signals**: `sim.on_*_subscribe(callback)` to react; `sim.emit_*()` to fire.
+- **TypeDamage.True_** is used instead of `True` (Python keyword).
+
+See `python/tests/test_moba.py` for the full test suite.
