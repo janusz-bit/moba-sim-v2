@@ -77,7 +77,8 @@
             lldb
             boost
             catch2_3
-            # Python with moba-sim + test deps pre-installed (no PYTHONPATH needed)
+            # Docs toolchain
+            doxygen
             (python3.withPackages (
               ps: with ps; [
                 numpy
@@ -85,6 +86,9 @@
                 nanobind
                 scikit-build-core
                 moba-sim-py
+                sphinx
+                breathe
+                furo
               ]
             ))
           ]);
