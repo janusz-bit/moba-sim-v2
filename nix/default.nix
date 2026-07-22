@@ -15,6 +15,32 @@
       pkgs,
       ...
     }:
+    let
+      # Build the moba-sim Python package as a proper Nix derivation.
+      # scikit-build-core compiles the nanobind extension via CMake.
+      moba-sim-py = pkgs.python3Packages.buildPythonPackage {
+        pname = "moba-sim";
+        version = "0.1.0";
+        src = ../.;
+        pyproject = true;
+        build-system = with pkgs.python3Packages; [
+          scikit-build-core
+          nanobind
+        ];
+        nativeBuildInputs = [
+          pkgs.cmake
+          pkgs.ninja
+        ];
+        dependencies = [ pkgs.python3Packages.numpy ];
+        dontUseCmakeConfigure = true;
+        # scikit-build-core needs to find our CMake project
+        preConfigure = ''
+          export CMAKE_ARGS="-DMOBA_SIM_BUILD_TESTS=OFF -DMOBA_SIM_BUILD_PYTHON=ON $CMAKE_ARGS"
+        '';
+        # The C++ static lib is built as part of the Python wheel build.
+        pythonImportsCheck = [ "moba" ];
+      };
+    in
     {
       formatter = pkgs.nixfmt-tree;
       pre-commit.settings.hooks = {
@@ -51,15 +77,14 @@
             lldb
             boost
             catch2_3
-            # Python bindings toolchain — bundle Python with packages so
-            # PYTHONPATH is wired automatically (per NixOS wiki / withPackages).
+            # Python with moba-sim + test deps pre-installed (no PYTHONPATH needed)
             (python3.withPackages (
               ps: with ps; [
-                nanobind
-                scikit-build-core
                 numpy
                 pytest
-                virtualenv
+                nanobind
+                scikit-build-core
+                moba-sim-py
               ]
             ))
           ]);
@@ -78,6 +103,8 @@
         ];
         doCheck = false;
       };
+
+      packages.moba-sim-python = moba-sim-py;
 
       checks.tests = pkgs.stdenv.mkDerivation {
         name = "moba-sim-tests";

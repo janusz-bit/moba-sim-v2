@@ -19,10 +19,13 @@ cmake --build build
 
 ### Python bindings
 
+The Python package is built as a Nix derivation and included in the dev shell
+via `python3.withPackages`. No `PYTHONPATH` or `pip install` needed.
+
 ```sh
-cmake -B build -DMOBA_SIM_BUILD_PYTHON=ON
-cmake --build build --target moba_ext
-PYTHONPATH=python python3 -c "from moba import Champion, Stat; print('ok')"
+nix develop
+python3 -c "from moba import Champion, Stat; print('ok')"
+python3 -m pytest python/tests/
 ```
 
 ## Test
@@ -32,7 +35,7 @@ Python tests use pytest.
 
 ```sh
 ctest --test-dir build                                    # C++ (216 tests)
-PYTHONPATH=python python3 -m pytest python/tests/         # Python (17 tests)
+python3 -m pytest python/tests/                           # Python (17 tests)
 ```
 
 ## Nix
