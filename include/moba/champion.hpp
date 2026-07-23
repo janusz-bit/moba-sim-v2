@@ -44,18 +44,23 @@ struct Champion {
   /// - `mods` are folded into a copy of `mod_db` and run through the full
   ///   Base/Inc/More pipeline, so a passive can express additive (Base),
   ///   percent-increase (Inc), or multiplicative (More) effects.
+  /// - `emitted_events` are new events to be dispatched by the Simulation
+  ///   after the current evaluation step (enables reactive chaining).
   /// - `alive` controls the passive's lifetime:
   ///   - `true`  — passive stays in the queue (permanent / temp still active)
   ///   - `false` — passive is removed after its mods are applied (one-shot /
   ///     expired)
   struct PassiveResult {
     std::vector<Modifier> mods; ///< Modifiers to fold into the pipeline
-    bool alive = true;          ///< Whether this passive stays alive
+    std::vector<PassiveEvent> emitted_events; ///< Events to dispatch after
+    bool alive = true; ///< Whether this passive stays alive
 
     /// @param m Modifiers (defaults to empty).
     /// @param a Alive flag (defaults to `true`).
-    PassiveResult(std::vector<Modifier> m = {}, bool a = true)
-        : mods(std::move(m)), alive(a) {}
+    /// @param ev Emitted events (defaults to empty).
+    PassiveResult(std::vector<Modifier> m = {}, bool a = true,
+                  std::vector<PassiveEvent> ev = {})
+        : mods(std::move(m)), emitted_events(std::move(ev)), alive(a) {}
   };
 
   /// Passive callback signature.
@@ -63,9 +68,13 @@ struct Champion {
   /// @param base  Stats from `mod_db` (without passives) — informational.
   /// @param final Current result from the previous iteration.
   /// @param time  Absolute simulation time (starts at 0, only increases).
-  /// @return `PassiveResult` with mods and alive flag.
-  using Passive = std::function<PassiveResult(
-      const Stats &base, const Stats &final, const Type &time)>;
+  /// @param event The event being dispatched, or `std::monostate` for normal
+  ///              stat evaluation. Passives can inspect the event to react
+  ///              (e.g. grant shield on `DamageReceived`).
+  /// @return `PassiveResult` with mods, emitted events, and alive flag.
+  using Passive =
+      std::function<PassiveResult(const Stats &base, const Stats &final,
+                                  const Type &time, const PassiveEvent &event)>;
 
   /// A passive paired with an id and source. The id is used by
   /// `addPassive()` to deduplicate: inserting an entry whose id already

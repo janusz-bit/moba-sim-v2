@@ -43,10 +43,12 @@ TEST_CASE("LifeSteal stacks additively from multiple sources", "[lifesteal]") {
 TEST_CASE("LifeSteal via passive Inc mod", "[lifesteal]") {
   Champion champ;
   champ.mod_db.add(Stat::LifeSteal, ModType::Base, 0.05, Source{"Item", ""});
-  champ.addPassive(factory().make([](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{{{Stat::LifeSteal, ModType::Base, 0.05, {}}},
-                                   true};
-  }));
+  champ.addPassive(
+      factory().make([](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{
+            {{Stat::LifeSteal, ModType::Base, 0.05, {}}},
+            true};
+      }));
   Stats r = champ.evaluateChampion();
   REQUIRE(r[std::to_underlying(Stat::LifeSteal)] == Catch::Approx(0.10));
 }
@@ -190,16 +192,16 @@ TEST_CASE("Combat: attacker heals via LifeSteal stat", "[lifesteal][combat]") {
   REQUIRE(heal == Catch::Approx(3.6));
 
   // Apply damage to target
-  target.addPassive(
-      factory().make([dealt](const Stats &, const Stats &, const Type &) {
+  target.addPassive(factory().make(
+      [dealt](const Stats &, const Stats &, const Type &, const auto &) {
         return Champion::PassiveResult{
             {{moba::Stat::CurrentHP, moba::ModType::Base, -dealt, {}}},
             false};
       }));
 
   // Apply heal to attacker
-  attacker.addPassive(
-      factory().make([heal](const Stats &, const Stats &, const Type &) {
+  attacker.addPassive(factory().make(
+      [heal](const Stats &, const Stats &, const Type &, const auto &) {
         return Champion::PassiveResult{
             {{moba::Stat::CurrentHP, moba::ModType::Base, heal, {}}},
             false};
@@ -372,8 +374,8 @@ TEST_CASE("evaluateChampion converges with oscillating passive",
   // Uses mutable counter to track iteration
   Champion champ;
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
-  champ.addPassive(
-      factory().make([iter = 0](const Stats &, const Stats &, Type) mutable {
+  champ.addPassive(factory().make(
+      [iter = 0](const Stats &, const Stats &, Type, const auto &) mutable {
         Stats bonus{};
         Type val = (iter % 2 == 0) ? 10.0 : -10.0;
         bonus[std::to_underlying(Stat::AD)] = val;
@@ -389,9 +391,10 @@ TEST_CASE("evaluateChampion with passive returning empty mods",
           "[champion][edge]") {
   Champion champ;
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
-  champ.addPassive(factory().make([](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{{}, true}; // empty mods, permanent
-  }));
+  champ.addPassive(
+      factory().make([](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{{}, true}; // empty mods, permanent
+      }));
   Stats r = champ.evaluateChampion();
   REQUIRE(r[std::to_underlying(Stat::AD)] == Catch::Approx(50.0));
   REQUIRE(champ.passives.size() == 1); // permanent stays
@@ -402,10 +405,11 @@ TEST_CASE("evaluateChampion with 100 passives all adding +1 AD",
   Champion champ;
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
   for (int i = 0; i < 100; ++i) {
-    champ.addPassive(factory().make([](const Stats &, const Stats &, Type) {
-      return Champion::PassiveResult{{{Stat::AD, ModType::Base, 1.0, {}}},
-                                     true};
-    }));
+    champ.addPassive(
+        factory().make([](const Stats &, const Stats &, Type, const auto &) {
+          return Champion::PassiveResult{{{Stat::AD, ModType::Base, 1.0, {}}},
+                                         true};
+        }));
   }
   Stats r = champ.evaluateChampion();
   // 50 + 100 * 1 = 150
@@ -417,9 +421,11 @@ TEST_CASE("evaluateChampion max_iter=0 throws immediately",
           "[champion][edge]") {
   Champion champ;
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
-  champ.addPassive(factory().make([](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{{{Stat::AD, ModType::Base, 10.0, {}}}, true};
-  }));
+  champ.addPassive(
+      factory().make([](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{{{Stat::AD, ModType::Base, 10.0, {}}},
+                                       true};
+      }));
   // max_iter=0 → do-while runs once, then iter >= max_iter → check delta
   // delta = |60 - 50| = 10 > eps → throw
   REQUIRE_THROWS_AS(champ.evaluateChampion(0.001, 0), moba::ConvergenceError);
@@ -429,9 +435,11 @@ TEST_CASE("evaluateChampion with eps larger than delta converges",
           "[champion][edge]") {
   Champion champ;
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
-  champ.addPassive(factory().make([](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{{{Stat::AD, ModType::Base, 10.0, {}}}, true};
-  }));
+  champ.addPassive(
+      factory().make([](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{{{Stat::AD, ModType::Base, 10.0, {}}},
+                                       true};
+      }));
   // delta after 1 iter = 10; eps=20 → 10 < 20 → converges immediately
   Stats r = champ.evaluateChampion(20.0, 100);
   REQUIRE(r[std::to_underlying(Stat::AD)] == Catch::Approx(60.0));
@@ -442,11 +450,14 @@ TEST_CASE("evaluateChampion with NaN-producing passive throws or is caught",
   Champion champ;
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
   // Passive that returns NaN — should cause convergence issues
-  champ.addPassive(factory().make([](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{
-        {{Stat::AD, ModType::Base, std::numeric_limits<Type>::quiet_NaN(), {}}},
-        true};
-  }));
+  champ.addPassive(
+      factory().make([](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{{{Stat::AD,
+                                         ModType::Base,
+                                         std::numeric_limits<Type>::quiet_NaN(),
+                                         {}}},
+                                       true};
+      }));
   // NaN comparisons are always false, so delta check (NaN > eps) is false
   // → "converges" immediately with NaN result. Just verify no crash.
   REQUIRE_NOTHROW(champ.evaluateChampion(0.001, 100));
@@ -459,10 +470,11 @@ TEST_CASE("applyPassives with 100 one-shot passives all consumed in one call",
   Champion champ;
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
   for (int i = 0; i < 100; ++i) {
-    champ.addPassive(factory().make([](const Stats &, const Stats &, Type) {
-      return Champion::PassiveResult{{{Stat::AD, ModType::Base, 1.0, {}}},
-                                     false};
-    }));
+    champ.addPassive(
+        factory().make([](const Stats &, const Stats &, Type, const auto &) {
+          return Champion::PassiveResult{{{Stat::AD, ModType::Base, 1.0, {}}},
+                                         false};
+        }));
   }
   Stats base = champ.getBaseStats();
   Stats r = champ.applyPassives(base, base);
@@ -476,12 +488,13 @@ TEST_CASE(
   Champion champ;
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
   champ.mod_db.add(Stat::MaxHP, ModType::Base, 1000.0, Source{"Base", ""});
-  champ.addPassive(factory().make([](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{{{Stat::AD, ModType::Base, 10.0, {}},
-                                    {Stat::MaxHP, ModType::Base, 200.0, {}},
-                                    {Stat::AR, ModType::Base, 30.0, {}}},
-                                   true};
-  }));
+  champ.addPassive(
+      factory().make([](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{{{Stat::AD, ModType::Base, 10.0, {}},
+                                        {Stat::MaxHP, ModType::Base, 200.0, {}},
+                                        {Stat::AR, ModType::Base, 30.0, {}}},
+                                       true};
+      }));
   Stats base = champ.getBaseStats();
   Stats r = champ.applyPassives(base, base);
   REQUIRE(r[std::to_underlying(Stat::AD)] == Catch::Approx(60.0));
@@ -493,8 +506,8 @@ TEST_CASE("applyPassives temp passive with huge duration stays alive",
           "[champion][edge]") {
   Champion champ;
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
-  champ.addPassive(
-      factory().make([duration = 1e9](const Stats &, const Stats &, Type time) {
+  champ.addPassive(factory().make(
+      [duration = 1e9](const Stats &, const Stats &, Type time, const auto &) {
         return Champion::PassiveResult{{{Stat::AD, ModType::Base, 10.0, {}}},
                                        time < duration};
       }));
@@ -508,7 +521,8 @@ TEST_CASE("applyPassives temp passive with zero duration expires immediately",
   Champion champ;
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
   champ.addPassive(factory().make(
-      [start = 0.0, duration = 0.0](const Stats &, const Stats &, Type time) {
+      [start = 0.0,
+       duration = 0.0](const Stats &, const Stats &, Type time, const auto &) {
         return Champion::PassiveResult{{{Stat::AD, ModType::Base, 10.0, {}}},
                                        time - start < duration};
       }));
@@ -523,10 +537,10 @@ TEST_CASE("applyPassives temp passive with zero duration expires immediately",
 
 TEST_CASE("PassiveFactory auto-increments ids", "[champion][edge]") {
   Champion::PassiveFactory f;
-  auto e1 = f.make([](const Stats &, const Stats &, Type) {
+  auto e1 = f.make([](const Stats &, const Stats &, Type, const auto &) {
     return Champion::PassiveResult{{}, true};
   });
-  auto e2 = f.make([](const Stats &, const Stats &, Type) {
+  auto e2 = f.make([](const Stats &, const Stats &, Type, const auto &) {
     return Champion::PassiveResult{{}, true};
   });
   REQUIRE(e1.id != e2.id);
@@ -538,10 +552,10 @@ TEST_CASE("addPassive refresh with same id replaces passive",
           "[champion][edge]") {
   Champion champ;
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
-  auto passive1 = [](const Stats &, const Stats &, Type) {
+  auto passive1 = [](const Stats &, const Stats &, Type, const auto &) {
     return Champion::PassiveResult{{{Stat::AD, ModType::Base, 10.0, {}}}, true};
   };
-  auto passive2 = [](const Stats &, const Stats &, Type) {
+  auto passive2 = [](const Stats &, const Stats &, Type, const auto &) {
     return Champion::PassiveResult{{{Stat::AD, ModType::Base, 20.0, {}}}, true};
   };
   champ.addPassive(Champion::PassiveEntry{42, passive1});
@@ -610,13 +624,15 @@ TEST_CASE("evaluateChampion is numerically stable across repeated calls",
           "[champion][edge]") {
   Champion champ;
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
-  champ.addPassive(factory().make([](const Stats &, const Stats &final, Type) {
-    return Champion::PassiveResult{{{Stat::AD,
-                                     ModType::Base,
-                                     final[std::to_underlying(Stat::AD)] * 0.1,
-                                     {}}},
-                                   true};
-  }));
+  champ.addPassive(
+      factory().make([](const Stats &, const Stats &final, Type, const auto &) {
+        return Champion::PassiveResult{
+            {{Stat::AD,
+              ModType::Base,
+              final[std::to_underlying(Stat::AD)] * 0.1,
+              {}}},
+            true};
+      }));
   // Fixed point: 50/0.9 ≈ 55.5556
   Stats r1 = champ.evaluateChampion(0.0001);
   for (int i = 0; i < 100; ++i) {
@@ -668,7 +684,7 @@ TEST_CASE("Source equality compares all three fields", "[source]") {
 
 TEST_CASE("PassiveEntry default source is empty", "[passive][source]") {
   Champion::PassiveFactory f;
-  auto e = f.make([](const Stats &, const Stats &, Type) {
+  auto e = f.make([](const Stats &, const Stats &, Type, const auto &) {
     return Champion::PassiveResult{{}, true};
   });
   REQUIRE(e.source.name.empty());
@@ -677,10 +693,11 @@ TEST_CASE("PassiveEntry default source is empty", "[passive][source]") {
 
 TEST_CASE("PassiveEntry with source stores it", "[passive][source]") {
   Champion::PassiveFactory f;
-  auto e = f.make([](const Stats &,
-                     const Stats &,
-                     Type) { return Champion::PassiveResult{{}, true}; },
-                  Source{"Item", "Bloodthirster", "attacker"});
+  auto e = f.make(
+      [](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{{}, true};
+      },
+      Source{"Item", "Bloodthirster", "attacker"});
   REQUIRE(e.source.name == "Item");
   REQUIRE(e.source.description == "Bloodthirster");
   REQUIRE(e.source.origin() == "attacker");
@@ -690,7 +707,7 @@ TEST_CASE("addPassive stores source on passive entry", "[passive][source]") {
   Champion champ;
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
   champ.addPassive(factory().make(
-      [](const Stats &, const Stats &, Type) {
+      [](const Stats &, const Stats &, Type, const auto &) {
         return Champion::PassiveResult{{{Stat::AD, ModType::Base, 10.0, {}}},
                                        true};
       },
@@ -706,7 +723,7 @@ TEST_CASE("addPassive refresh without source keeps old source",
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
   champ.addPassive(Champion::PassiveEntry{
       100,
-      [](const Stats &, const Stats &, Type) {
+      [](const Stats &, const Stats &, Type, const auto &) {
         return Champion::PassiveResult{{{Stat::AD, ModType::Base, 10.0, {}}},
                                        true};
       },
@@ -714,12 +731,12 @@ TEST_CASE("addPassive refresh without source keeps old source",
   REQUIRE(champ.passives[0].source.name == "Item");
 
   // Refresh without source → keeps old source
-  champ.addPassive(
-      Champion::PassiveEntry{100, [](const Stats &, const Stats &, Type) {
-                               return Champion::PassiveResult{
-                                   {{Stat::AD, ModType::Base, 20.0, {}}},
-                                   true};
-                             }});
+  champ.addPassive(Champion::PassiveEntry{
+      100,
+      [](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{{{Stat::AD, ModType::Base, 20.0, {}}},
+                                       true};
+      }});
   REQUIRE(champ.passives[0].source.name == "Item");
   REQUIRE(champ.passives[0].source.origin() == "attacker");
 }
@@ -730,7 +747,7 @@ TEST_CASE("addPassive refresh with new source updates source",
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
   champ.addPassive(Champion::PassiveEntry{
       101,
-      [](const Stats &, const Stats &, Type) {
+      [](const Stats &, const Stats &, Type, const auto &) {
         return Champion::PassiveResult{{{Stat::AD, ModType::Base, 10.0, {}}},
                                        true};
       },
@@ -739,7 +756,7 @@ TEST_CASE("addPassive refresh with new source updates source",
   // Refresh with new source
   champ.addPassive(Champion::PassiveEntry{
       101,
-      [](const Stats &, const Stats &, Type) {
+      [](const Stats &, const Stats &, Type, const auto &) {
         return Champion::PassiveResult{{{Stat::AD, ModType::Base, 20.0, {}}},
                                        true};
       },
@@ -752,13 +769,13 @@ TEST_CASE("two passives from different origins coexist", "[passive][source]") {
   Champion champ;
   champ.mod_db.add(Stat::AD, ModType::Base, 50.0, Source{"Base", ""});
   champ.addPassive(factory().make(
-      [](const Stats &, const Stats &, Type) {
+      [](const Stats &, const Stats &, Type, const auto &) {
         return Champion::PassiveResult{{{Stat::AD, ModType::Base, 10.0, {}}},
                                        true};
       },
       Source{"Item", "Bloodthirster", "attacker"}));
   champ.addPassive(factory().make(
-      [](const Stats &, const Stats &, Type) {
+      [](const Stats &, const Stats &, Type, const auto &) {
         return Champion::PassiveResult{{{Stat::AD, ModType::Base, 5.0, {}}},
                                        true};
       },

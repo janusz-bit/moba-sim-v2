@@ -41,7 +41,7 @@ def test_evaluate_champion_no_passives():
 def test_evaluate_champion_permanent_passive():
     c = Champion({Stat.AD: 50})
 
-    def bonus(base, final, time):
+    def bonus(base, final, time, event):
         return [(Stat.AD, ModType.Base, 10.0)]
 
     c.add_passive(bonus)
@@ -52,7 +52,7 @@ def test_evaluate_champion_permanent_passive():
 def test_passive_dict_result():
     c = Champion({Stat.AD: 50})
 
-    def bonus(base, final, time):
+    def bonus(base, final, time, event):
         return {"mods": [(Stat.AD, ModType.Base, 25.0)], "alive": False}
 
     c.add_passive(bonus)

@@ -34,11 +34,17 @@
 #include <cstddef>
 #include <functional>
 #include <utility>
+#include <variant>
 
 namespace nb = nanobind;
 using namespace moba;
 
 namespace {
+// Helper for std::visit with overloaded lambdas
+template <class... Ts> struct overloaded : Ts... {
+  using Ts::operator()...;
+};
+template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 // Construct a Champion from a Python dict {Stat: value} (or list of pairs).
 // We build a std::initializer_list-like sequence by constructing the Champion
@@ -80,22 +86,35 @@ auto stats_to_numpy(const Champion::Stats &s) {
 }
 
 // Wrap a Python callable as a Champion::Passive (std::function).  The Python
-// callable receives (base ndarray, final ndarray, time) and returns either:
+// callable receives (base ndarray, final ndarray, time, event) and returns
+// either:
 //   - a list of (Stat, ModType, value[, source]) tuples, or
-//   - a dict {"mods": [...], "alive": bool} matching PassiveResult.
+//   - a dict {"mods": [...], "alive": bool, "events": [...]} matching
+//   PassiveResult.
 // Returns a Champion::PassiveResult.
 auto make_passive(nb::callable py_fn) {
   return [fn = nb::cast<std::function<nb::object(nb::ndarray<nb::numpy, double>,
                                                  nb::ndarray<nb::numpy, double>,
-                                                 Type)>>(py_fn)](
+                                                 Type,
+                                                 nb::object)>>(py_fn)](
              const Champion::Stats &base,
              const Champion::Stats &final,
-             const Type &time) -> Champion::PassiveResult {
-    nb::object result = fn(stats_to_numpy(base), stats_to_numpy(final), time);
+             const Type &time,
+             const PassiveEvent &event) -> Champion::PassiveResult {
+    // Convert PassiveEvent variant to Python object
+    nb::object py_event =
+        std::visit(overloaded{
+                       [](std::monostate) { return nb::none(); },
+                       [](const auto &e) { return nb::cast(e); },
+                   },
+                   event);
+
+    nb::object result =
+        fn(stats_to_numpy(base), stats_to_numpy(final), time, py_event);
     if (result.is_none()) {
       return {};
     }
-    // Accept dict {"mods": [...], "alive": bool}
+    // Accept dict {"mods": [...], "alive": bool, "events": [...]}
     if (nb::isinstance<nb::dict>(result)) {
       nb::dict d = nb::cast<nb::dict>(result);
       Champion::PassiveResult pr;
@@ -110,6 +129,7 @@ auto make_passive(nb::callable py_fn) {
         }
       }
       pr.alive = d.contains("alive") ? nb::cast<bool>(d["alive"]) : true;
+      // TODO: parse "events" key for emitted_events
       return pr;
     }
     // Accept a bare list of tuples (alive defaults to true)
@@ -430,7 +450,7 @@ NB_MODULE(moba_ext, m) {
              TypeDamage type,
              const Source &src,
              Type t) {
-            sim.onAttackHit.emit({actor, target, amount, type, src, t});
+            sim.dispatchEvent(AttackHit{actor, target, amount, type, src, t});
           },
           nb::arg("actor"),
           nb::arg("target"),
@@ -444,7 +464,9 @@ NB_MODULE(moba_ext, m) {
              std::size_t target,
              Type amount,
              const Source &src,
-             Type t) { sim.onHealApplied.emit({target, amount, src, t}); },
+             Type t) {
+            sim.dispatchEvent(HealApplied{target, amount, src, t});
+          },
           nb::arg("target"),
           nb::arg("amount"),
           nb::arg("source") = Source{},

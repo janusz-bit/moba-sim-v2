@@ -3,12 +3,16 @@
 
 #include "moba_sim.hpp"
 
+#include <variant>
+
+using moba::AttackHit;
 using moba::Champion;
 using moba::DamageDealt;
 using moba::DamageReceived;
 using moba::Death;
 using moba::HealApplied;
 using moba::ModType;
+using moba::PassiveEvent;
 using moba::Simulation;
 using moba::Source;
 using moba::Stat;
@@ -58,7 +62,7 @@ TEST_CASE("Source equality compares chain recursively", "[source][chain]") {
   REQUIRE(s1 != s3);
 }
 
-// --- Event system basics ---
+// --- Event system: dispatchEvent ---
 
 TEST_CASE("AttackHit produces DamageReceived with mitigated amount",
           "[events]") {
@@ -73,15 +77,19 @@ TEST_CASE("AttackHit produces DamageReceived with mitigated amount",
   sim.champions.push_back(std::move(attacker));
   sim.champions.push_back(std::move(target));
 
-  sim.onAttackHit.emit(
-      {0, 1, 100.0, TypeDamage::Physical, Source{"Basic attack", ""}, 0.0});
+  sim.dispatchEvent(AttackHit{0,
+                              1,
+                              100.0,
+                              TypeDamage::Physical,
+                              Source{"Basic attack", ""},
+                              0.0});
 
   // 100 physical vs 100 AR -> 50 post-mitigation
   Stats t = sim.champions[1].getBaseStats();
   REQUIRE(getStat(t, Stat::CurrentHP) == Catch::Approx(950.0).epsilon(0.01));
 }
 
-TEST_CASE("Shield proc on DamageReceived grants shield", "[events]") {
+TEST_CASE("Shield proc passive on DamageReceived grants shield", "[events]") {
   Simulation sim;
   Champion attacker{{Stat::MaxHP, 1000},
                     {Stat::CurrentHP, 1000},
@@ -93,18 +101,21 @@ TEST_CASE("Shield proc on DamageReceived grants shield", "[events]") {
   sim.champions.push_back(std::move(target));
 
   // Shield proc: on DamageReceived -> +200 ShieldHP, one-shot
-  sim.onDamageReceived.subscribe([&sim](const DamageReceived &ev) {
-    if (ev.target_id != 1) {
-      return;
-    }
-    sim.champions[1].mod_db.add(Stat::ShieldHP,
-                                ModType::Base,
-                                200.0,
-                                Source{"Sterak's Gage", ""});
-  });
+  sim.champions[1].addPassive(factory().make(
+      [](const Stats &, const Stats &, Type, const PassiveEvent &ev)
+          -> Champion::PassiveResult {
+        if (!std::holds_alternative<moba::DamageReceived>(ev)) {
+          return {};
+        }
+        return {{{Stat::ShieldHP, ModType::Base, 200.0, {}}}, false};
+      }));
 
-  sim.onAttackHit.emit(
-      {0, 1, 100.0, TypeDamage::Physical, Source{"Basic attack", ""}, 0.0});
+  sim.dispatchEvent(AttackHit{0,
+                              1,
+                              100.0,
+                              TypeDamage::Physical,
+                              Source{"Basic attack", ""},
+                              0.0});
 
   // Damage was 50 (mitigated), HP = 950. Shield proc adds 200.
   Stats t = sim.champions[1].getBaseStats();
@@ -124,9 +135,12 @@ TEST_CASE("Lifesteal is built into Simulation", "[events]") {
   sim.champions.push_back(std::move(attacker));
   sim.champions.push_back(std::move(target));
 
-  // No manual subscription needed — lifesteal is automatic via internal handler
-  sim.onAttackHit.emit(
-      {0, 1, 100.0, TypeDamage::Physical, Source{"Basic attack", ""}, 0.0});
+  sim.dispatchEvent(AttackHit{0,
+                              1,
+                              100.0,
+                              TypeDamage::Physical,
+                              Source{"Basic attack", ""},
+                              0.0});
 
   // 100 phys vs 100 AR -> 50 mitigated. Lifesteal: 50 * 0.12 = 6 HP heal
   Stats a = sim.champions[0].getBaseStats();
@@ -148,9 +162,8 @@ TEST_CASE("Omnivamp heals from all damage types", "[events]") {
   sim.champions.push_back(std::move(attacker));
   sim.champions.push_back(std::move(target));
 
-  // Magic damage — omnivamp applies, lifesteal doesn't
-  sim.onAttackHit.emit(
-      {0, 1, 100.0, TypeDamage::Magic, Source{"Spell", ""}, 0.0});
+  sim.dispatchEvent(
+      AttackHit{0, 1, 100.0, TypeDamage::Magic, Source{"Spell", ""}, 0.0});
 
   // 100 magic vs 100 MR -> 50 post-mitigation. Omnivamp: 50 * 0.10 = 5 heal
   Stats a = sim.champions[0].getBaseStats();
@@ -169,11 +182,10 @@ TEST_CASE("LifeSteal does not trigger on magic damage", "[events]") {
   sim.champions.push_back(std::move(attacker));
   sim.champions.push_back(std::move(target));
 
-  // Magic damage — lifesteal should NOT trigger
-  sim.onAttackHit.emit(
-      {0, 1, 100.0, TypeDamage::Magic, Source{"Spell", ""}, 0.0});
+  sim.dispatchEvent(
+      AttackHit{0, 1, 100.0, TypeDamage::Magic, Source{"Spell", ""}, 0.0});
 
-  // 100 magic vs 100 MR -> 50 post-mitigation, no heal
+  // 100 magic vs 100 MR -> 50 post-mitigation, no heal (no omnivamp)
   Stats a = sim.champions[0].getBaseStats();
   REQUIRE(getStat(a, Stat::CurrentHP) == Catch::Approx(800.0).epsilon(0.01));
 }
@@ -189,7 +201,7 @@ TEST_CASE("Event source chain tracks provenance", "[events][source]") {
   sim.champions.push_back(std::move(attacker));
   sim.champions.push_back(std::move(target));
 
-  // Track source chain from event
+  // Track source chain from event via observer signal
   Source captured_source;
   sim.onDamageReceived.subscribe([&captured_source](const DamageReceived &ev) {
     captured_source = ev.source;
@@ -197,7 +209,8 @@ TEST_CASE("Event source chain tracks provenance", "[events][source]") {
 
   auto jinx = std::make_shared<Source>("Jinx", "champion");
   Source attack_src{"Basic attack", "auto", jinx};
-  sim.onAttackHit.emit({0, 1, 100.0, TypeDamage::Physical, attack_src, 0.0});
+  sim.dispatchEvent(
+      AttackHit{0, 1, 100.0, TypeDamage::Physical, attack_src, 0.0});
 
   // DamageReceived source should have parent "Basic attack",
   // grandparent "Jinx"
@@ -208,7 +221,7 @@ TEST_CASE("Event source chain tracks provenance", "[events][source]") {
   REQUIRE(captured_source.parent->parent->name == "Jinx");
 }
 
-TEST_CASE("Regular passive ignores signals", "[events]") {
+TEST_CASE("Regular passive ignores events (monostate only)", "[events]") {
   Simulation sim;
   Champion attacker{{Stat::MaxHP, 1000},
                     {Stat::CurrentHP, 1000},
@@ -219,16 +232,23 @@ TEST_CASE("Regular passive ignores signals", "[events]") {
   sim.champions.push_back(std::move(attacker));
   sim.champions.push_back(std::move(target));
 
-  // Regular passive (no signal subscription) - should not react to events
+  // Regular passive — returns bonus on monostate, ignores events
   sim.champions[1].addPassive(factory().make(
-      [](const Stats &, const Stats &, Type) {
-        return Champion::PassiveResult{{{Stat::AR, ModType::Base, 10.0, {}}},
-                                       true};
+      [](const Stats &, const Stats &, Type, const PassiveEvent &ev)
+          -> Champion::PassiveResult {
+        if (!std::holds_alternative<std::monostate>(ev)) {
+          return {}; // ignore events
+        }
+        return {{{Stat::AR, ModType::Base, 10.0, {}}}, true};
       },
       Source{"Buff", ""}));
 
-  sim.onAttackHit.emit(
-      {0, 1, 100.0, TypeDamage::Physical, Source{"Basic attack", ""}, 0.0});
+  sim.dispatchEvent(AttackHit{0,
+                              1,
+                              100.0,
+                              TypeDamage::Physical,
+                              Source{"Basic attack", ""},
+                              0.0});
 
   // Target should still have +10 AR from permanent passive (via
   // evaluateChampion)
@@ -238,7 +258,8 @@ TEST_CASE("Regular passive ignores signals", "[events]") {
   REQUIRE(getStat(t, Stat::CurrentHP) < 1000.0);
 }
 
-TEST_CASE("Counter heal on DamageReceived emits HealApplied", "[events]") {
+TEST_CASE("Counter heal passive on DamageReceived emits HealApplied",
+          "[events]") {
   Simulation sim;
   Champion attacker{{Stat::MaxHP, 1000},
                     {Stat::CurrentHP, 1000},
@@ -249,14 +270,28 @@ TEST_CASE("Counter heal on DamageReceived emits HealApplied", "[events]") {
   sim.champions.push_back(std::move(attacker));
   sim.champions.push_back(std::move(target));
 
-  // Counter heal: on DamageReceived -> heal self for 10
-  sim.onDamageReceived.subscribe([&sim](const DamageReceived &ev) {
-    sim.onHealApplied.emit(
-        {ev.target_id, 10.0, Source{"Counter heal", ""}, ev.time});
-  });
+  // Counter heal: on DamageReceived -> emit HealApplied for 10 HP
+  sim.champions[1].addPassive(factory().make(
+      [](const Stats &, const Stats &, Type, const PassiveEvent &ev)
+          -> Champion::PassiveResult {
+        if (!std::holds_alternative<moba::DamageReceived>(ev)) {
+          return {};
+        }
+        const auto &dmg = std::get<moba::DamageReceived>(ev);
+        return {{},
+                true,
+                {HealApplied{dmg.target_id,
+                             10.0,
+                             Source{"Counter heal", ""},
+                             dmg.time}}};
+      }));
 
-  sim.onAttackHit.emit(
-      {0, 1, 100.0, TypeDamage::Physical, Source{"Basic attack", ""}, 0.0});
+  sim.dispatchEvent(AttackHit{0,
+                              1,
+                              100.0,
+                              TypeDamage::Physical,
+                              Source{"Basic attack", ""},
+                              0.0});
 
   // Target took 50 damage, then healed 10 from counter -> 960
   Stats t = sim.champions[1].getBaseStats();
@@ -274,8 +309,8 @@ TEST_CASE("True damage attack bypasses mitigation", "[events]") {
   sim.champions.push_back(std::move(attacker));
   sim.champions.push_back(std::move(target));
 
-  sim.onAttackHit.emit(
-      {0, 1, 100.0, TypeDamage::True, Source{"True damage", ""}, 0.0});
+  sim.dispatchEvent(
+      AttackHit{0, 1, 100.0, TypeDamage::True, Source{"True damage", ""}, 0.0});
 
   // True damage bypasses mitigation -> 100 damage directly
   Stats t = sim.champions[1].getBaseStats();
@@ -294,9 +329,8 @@ TEST_CASE("Death event fires when HP reaches zero", "[events]") {
   bool death_seen = false;
   sim.onDeath.subscribe([&death_seen](const Death &) { death_seen = true; });
 
-  // 999 true damage vs 100 HP -> death
-  sim.onAttackHit.emit(
-      {0, 1, 999.0, TypeDamage::True, Source{"Execute", ""}, 0.0});
+  sim.dispatchEvent(
+      AttackHit{0, 1, 999.0, TypeDamage::True, Source{"Execute", ""}, 0.0});
 
   REQUIRE(death_seen);
   Stats t = sim.champions[1].getBaseStats();

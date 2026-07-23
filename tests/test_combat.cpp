@@ -31,11 +31,12 @@ TEST_CASE("Combat: physical damage reduced by armor", "[combat]") {
                                       target_base,
                                       0.0,
                                       0.0);
-  target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{
-        {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
-        false};
-  }));
+  target.addPassive(
+      factory().make([dealt](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{
+            {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
+            false};
+      }));
   Stats r = target.evaluateChampion();
   REQUIRE(r[std::to_underlying(Stat::CurrentHP)] == Catch::Approx(950.0));
 }
@@ -50,11 +51,12 @@ TEST_CASE("Combat: magic damage reduced by MR", "[combat]") {
   // 100 magic vs 50 MR → 100 * 100/150 ≈ 66.667
   Type dealt =
       moba::mitigated_damage(100.0, TypeDamage::Magic, target_base, 0.0, 0.0);
-  target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{
-        {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
-        false};
-  }));
+  target.addPassive(
+      factory().make([dealt](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{
+            {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
+            false};
+      }));
   Stats r = target.evaluateChampion();
   REQUIRE(r[std::to_underlying(Stat::CurrentHP)] ==
           Catch::Approx(1000.0 - 58.8235).epsilon(0.01));
@@ -83,8 +85,8 @@ TEST_CASE("Combat: full 2-champion trade — shred, burst, DoT, lifesteal, death
                     {Stat::MR, 50}};
 
   // --- Phase 1: permanent armor shred on defender (-30 AR) ---
-  defender.addPassive(
-      factory().make([](const Stats &, const Stats &, const Type &) {
+  defender.addPassive(factory().make(
+      [](const Stats &, const Stats &, const Type &, const auto &) {
         return Champion::PassiveResult{{{Stat::AR, ModType::Base, -30.0, {}}},
                                        true};
       }));
@@ -109,14 +111,14 @@ TEST_CASE("Combat: full 2-champion trade — shred, burst, DoT, lifesteal, death
   REQUIRE(spell_dealt == Catch::Approx(100.0).epsilon(0.01));
 
   // Stack both as one-shot damage on defender
-  defender.addPassive(
-      factory().make([aa_dealt](const Stats &, const Stats &, const Type &) {
+  defender.addPassive(factory().make(
+      [aa_dealt](const Stats &, const Stats &, const Type &, const auto &) {
         return Champion::PassiveResult{
             {{Stat::CurrentHP, ModType::Base, -aa_dealt, {}}},
             false};
       }));
-  defender.addPassive(
-      factory().make([spell_dealt](const Stats &, const Stats &, const Type &) {
+  defender.addPassive(factory().make(
+      [spell_dealt](const Stats &, const Stats &, const Type &, const auto &) {
         return Champion::PassiveResult{
             {{Stat::CurrentHP, ModType::Base, -spell_dealt, {}}},
             false};
@@ -128,18 +130,20 @@ TEST_CASE("Combat: full 2-champion trade — shred, burst, DoT, lifesteal, death
                              TypeDamage::Physical,
                              atk_base);
   REQUIRE(counter_dealt == Catch::Approx(37.5).epsilon(0.01));
-  attacker.addPassive(factory().make(
-      [counter_dealt](const Stats &, const Stats &, const Type &) {
-        return Champion::PassiveResult{
-            {{Stat::CurrentHP, ModType::Base, -counter_dealt, {}}},
-            false};
-      }));
+  attacker.addPassive(factory().make([counter_dealt](const Stats &,
+                                                     const Stats &,
+                                                     const Type &,
+                                                     const auto &) {
+    return Champion::PassiveResult{
+        {{Stat::CurrentHP, ModType::Base, -counter_dealt, {}}},
+        false};
+  }));
 
   // Lifesteal: attacker heals 12% of auto-attack damage dealt
   Type heal = aa_dealt * 0.12;
   REQUIRE(heal == Catch::Approx(6.443).epsilon(0.01));
-  attacker.addPassive(
-      factory().make([heal](const Stats &, const Stats &, const Type &) {
+  attacker.addPassive(factory().make(
+      [heal](const Stats &, const Stats &, const Type &, const auto &) {
         return Champion::PassiveResult{
             {{Stat::CurrentHP, ModType::Base, heal, {}}},
             false};
@@ -170,21 +174,22 @@ TEST_CASE("Combat: full 2-champion trade — shred, burst, DoT, lifesteal, death
                           Source{"Base", ""});
 
   // --- Phase 3: burn DoT (20 true damage/tick for 3 ticks at t=0,1,2) ---
-  defender.addPassive(factory().make(
-      [per_tick = 20.0,
-       start = 0.0,
-       duration = 3.0,
-       next_tick = 0.0,
-       accumulated =
-           0.0](const Stats &, const Stats &, const Type &time) mutable {
-        if (time >= next_tick && time < start + duration) {
-          accumulated += per_tick;
-          next_tick = time + 1.0;
-        }
-        return Champion::PassiveResult{
-            {{Stat::CurrentHP, ModType::Base, -accumulated, {}}},
-            time < start + duration};
-      }));
+  defender.addPassive(factory().make([per_tick = 20.0,
+                                      start = 0.0,
+                                      duration = 3.0,
+                                      next_tick = 0.0,
+                                      accumulated = 0.0](const Stats &,
+                                                         const Stats &,
+                                                         const Type &time,
+                                                         const auto &) mutable {
+    if (time >= next_tick && time < start + duration) {
+      accumulated += per_tick;
+      next_tick = time + 1.0;
+    }
+    return Champion::PassiveResult{
+        {{Stat::CurrentHP, ModType::Base, -accumulated, {}}},
+        time < start + duration};
+  }));
 
   Type def_hp_after_burst =
       defender.getBaseStats()[std::to_underlying(Stat::CurrentHP)];
@@ -221,12 +226,14 @@ TEST_CASE("Combat: full 2-champion trade — shred, burst, DoT, lifesteal, death
                           Source{"Base", ""});
 
   // --- Phase 4: killing blow (true damage exceeding remaining HP) ---
-  defender.addPassive(factory().make(
-      [def_hp_after_dot](const Stats &, const Stats &, const Type &) {
-        return Champion::PassiveResult{
-            {{Stat::CurrentHP, ModType::Base, -(def_hp_after_dot + 100.0), {}}},
-            false};
-      }));
+  defender.addPassive(factory().make([def_hp_after_dot](const Stats &,
+                                                        const Stats &,
+                                                        const Type &,
+                                                        const auto &) {
+    return Champion::PassiveResult{
+        {{Stat::CurrentHP, ModType::Base, -(def_hp_after_dot + 100.0), {}}},
+        false};
+  }));
   Stats def_dead = defender.evaluateChampion();
   REQUIRE(def_dead[std::to_underlying(Stat::CurrentHP)] <= 0.0);
   REQUIRE(def_dead[std::to_underlying(Stat::CurrentHP)] ==
@@ -252,11 +259,12 @@ TEST_CASE("Combat: true damage ignores resistances", "[combat]") {
   // 100 true damage → 100 HP loss regardless of AR/MR
   Type dealt =
       moba::mitigated_damage(100.0, TypeDamage::True, target_base, 0.0, 0.0);
-  target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{
-        {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
-        false};
-  }));
+  target.addPassive(
+      factory().make([dealt](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{
+            {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
+            false};
+      }));
   Stats r = target.evaluateChampion();
   REQUIRE(r[std::to_underlying(Stat::CurrentHP)] == Catch::Approx(900.0));
 }
@@ -282,11 +290,12 @@ TEST_CASE("Combat: flat armor penetration as stat", "[combat]") {
                                       target_base,
                                       flat_pen,
                                       0.0);
-  target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{
-        {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
-        false};
-  }));
+  target.addPassive(
+      factory().make([dealt](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{
+            {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
+            false};
+      }));
   Stats r = target.evaluateChampion();
   REQUIRE(r[std::to_underlying(Stat::CurrentHP)] ==
           Catch::Approx(1000.0 - 58.8235).epsilon(0.01));
@@ -313,11 +322,12 @@ TEST_CASE("Combat: percentage armor penetration as stat", "[combat]") {
                                       target_base,
                                       0.0,
                                       pct_pen);
-  target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{
-        {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
-        false};
-  }));
+  target.addPassive(
+      factory().make([dealt](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{
+            {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
+            false};
+      }));
   Stats r = target.evaluateChampion();
   REQUIRE(r[std::to_underlying(Stat::CurrentHP)] ==
           Catch::Approx(1000.0 - 58.8235).epsilon(0.01));
@@ -347,11 +357,12 @@ TEST_CASE("Combat: flat and percentage penetration stack", "[combat]") {
                                       target_base,
                                       flat_pen,
                                       pct_pen);
-  target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{
-        {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
-        false};
-  }));
+  target.addPassive(
+      factory().make([dealt](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{
+            {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
+            false};
+      }));
   Stats r = target.evaluateChampion();
   REQUIRE(r[std::to_underlying(Stat::CurrentHP)] ==
           Catch::Approx(1000.0 - 58.8235).epsilon(0.01));
@@ -418,8 +429,8 @@ TEST_CASE("Combat: ultimate 2-champion duel — all mechanics",
 
   // --- Phase 2: Permanent passives ---
   // ADC passive: +1 AD per 1% missing HP (scales as fight goes on)
-  adc.addPassive(
-      factory.make([](const Stats &base, const Stats &final, const Type &) {
+  adc.addPassive(factory.make(
+      [](const Stats &base, const Stats &final, const Type &, const auto &) {
         Type max_hp = final[std::to_underlying(Stat::MaxHP)];
         Type cur_hp = final[std::to_underlying(Stat::CurrentHP)];
         Type missing_pct = (max_hp - cur_hp) / max_hp;
@@ -433,8 +444,8 @@ TEST_CASE("Combat: ultimate 2-champion duel — all mechanics",
   // This models e.g. a passive that reduces the enemy's armor — here we
   // model it as the bruiser having a permanent -20 AR debuff applied to
   // themselves (simplified): they're easier to kill
-  bruiser.addPassive(
-      factory.make([](const Stats &, const Stats &, const Type &) {
+  bruiser.addPassive(factory.make(
+      [](const Stats &, const Stats &, const Type &, const auto &) {
         return Champion::PassiveResult{{{Stat::AR, ModType::Base, -20.0, {}}},
                                        true};
       }));
@@ -476,12 +487,14 @@ TEST_CASE("Combat: ultimate 2-champion duel — all mechanics",
   REQUIRE(shield_amount == Catch::Approx(230.0));
 
   // Apply shield to bruiser as a passive mod
-  bruiser.addPassive(
-      factory.make([shield_amount](const Stats &, const Stats &, const Type &) {
-        return Champion::PassiveResult{
-            {{Stat::ShieldHP, ModType::Base, shield_amount, {}}},
-            true};
-      }));
+  bruiser.addPassive(factory.make([shield_amount](const Stats &,
+                                                  const Stats &,
+                                                  const Type &,
+                                                  const auto &) {
+    return Champion::PassiveResult{
+        {{Stat::ShieldHP, ModType::Base, shield_amount, {}}},
+        true};
+  }));
 
   // Apply ADC's auto-attack damage to bruiser (shield absorbs first)
   auto [shield_after_aa, hp_after_aa] =
@@ -538,21 +551,22 @@ TEST_CASE("Combat: ultimate 2-champion duel — all mechanics",
   // --- Phase 4: Sustain (t=1–3) ---
 
   // Burn DoT on bruiser: 40 true damage per second for 3 seconds
-  bruiser.addPassive(factory.make(
-      [per_tick = 40.0,
-       start = 0.0,
-       duration = 3.0,
-       next_tick = 0.0,
-       accumulated =
-           0.0](const Stats &, const Stats &, const Type &time) mutable {
-        if (time >= next_tick && time < start + duration) {
-          accumulated += per_tick;
-          next_tick = time + 1.0;
-        }
-        return Champion::PassiveResult{
-            {{Stat::CurrentHP, ModType::Base, -accumulated, {}}},
-            time < start + duration};
-      }));
+  bruiser.addPassive(factory.make([per_tick = 40.0,
+                                   start = 0.0,
+                                   duration = 3.0,
+                                   next_tick = 0.0,
+                                   accumulated = 0.0](const Stats &,
+                                                      const Stats &,
+                                                      const Type &time,
+                                                      const auto &) mutable {
+    if (time >= next_tick && time < start + duration) {
+      accumulated += per_tick;
+      next_tick = time + 1.0;
+    }
+    return Champion::PassiveResult{
+        {{Stat::CurrentHP, ModType::Base, -accumulated, {}}},
+        time < start + duration};
+  }));
 
   // HP regen: 20 HP/5s = 4 HP/s for bruiser, 12/5 = 2.4 HP/s for ADC
   Type bruiser_regen_per_s =
@@ -696,11 +710,12 @@ TEST_CASE("Combat: attacker deals damage to target via passive", "[combat]") {
                              target_base,
                              0.0,
                              0.0);
-  target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{
-        {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
-        false};
-  }));
+  target.addPassive(
+      factory().make([dealt](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{
+            {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
+            false};
+      }));
   Stats r = target.evaluateChampion();
   REQUIRE(r[std::to_underlying(Stat::CurrentHP)] == Catch::Approx(970.0));
 }
@@ -720,8 +735,8 @@ TEST_CASE("Combat: multiple hits in one evaluation", "[combat]") {
                                       0.0,
                                       0.0);
   for (int i = 0; i < 3; ++i) {
-    target.addPassive(
-        factory().make([dealt](const Stats &, const Stats &, Type) {
+    target.addPassive(factory().make(
+        [dealt](const Stats &, const Stats &, Type, const auto &) {
           return Champion::PassiveResult{
               {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
               false};
@@ -749,18 +764,20 @@ TEST_CASE("Combat: mixed damage types in one evaluation", "[combat]") {
       moba::mitigated_damage(100.0, TypeDamage::Magic, target_base, 0.0, 0.0);
   Type true_d =
       moba::mitigated_damage(100.0, TypeDamage::True, target_base, 0.0, 0.0);
-  target.addPassive(factory().make([phys](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{
-        {{Stat::CurrentHP, ModType::Base, -phys, {}}},
-        false};
-  }));
-  target.addPassive(factory().make([magic](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{
-        {{Stat::CurrentHP, ModType::Base, -magic, {}}},
-        false};
-  }));
   target.addPassive(
-      factory().make([true_d](const Stats &, const Stats &, Type) {
+      factory().make([phys](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{
+            {{Stat::CurrentHP, ModType::Base, -phys, {}}},
+            false};
+      }));
+  target.addPassive(
+      factory().make([magic](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{
+            {{Stat::CurrentHP, ModType::Base, -magic, {}}},
+            false};
+      }));
+  target.addPassive(factory().make(
+      [true_d](const Stats &, const Stats &, Type, const auto &) {
         return Champion::PassiveResult{
             {{Stat::CurrentHP, ModType::Base, -true_d, {}}},
             false};
@@ -793,16 +810,17 @@ TEST_CASE("Combat: lifesteal heals attacker for fraction of damage",
                              0.0);
 
   // attacker deals damage to target
-  target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{
-        {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
-        false};
-  }));
+  target.addPassive(
+      factory().make([dealt](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{
+            {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
+            false};
+      }));
   (void)target.evaluateChampion();
 
   // attacker heals 20% of damage dealt
   attacker.addPassive(
-      factory().make([dealt](const Stats &, const Stats &, Type) {
+      factory().make([dealt](const Stats &, const Stats &, Type, const auto &) {
         return Champion::PassiveResult{
             {{Stat::CurrentHP, ModType::Base, dealt * 0.2, {}}},
             false};
@@ -824,11 +842,12 @@ TEST_CASE("Combat: damage passive is one-shot and consumed", "[combat]") {
                                       target_base,
                                       0.0,
                                       0.0);
-  target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{
-        {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
-        false};
-  }));
+  target.addPassive(
+      factory().make([dealt](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{
+            {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
+            false};
+      }));
   Stats first = target.evaluateChampion();
   REQUIRE(first[std::to_underlying(Stat::CurrentHP)] == Catch::Approx(950.0));
   REQUIRE(target.passives.empty());
@@ -850,11 +869,12 @@ TEST_CASE("Combat: negative armor amplifies damage", "[combat]") {
                                       target_base,
                                       0.0,
                                       0.0);
-  target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{
-        {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
-        false};
-  }));
+  target.addPassive(
+      factory().make([dealt](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{
+            {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
+            false};
+      }));
   Stats r = target.evaluateChampion();
   REQUIRE(r[std::to_underlying(Stat::CurrentHP)] ==
           Catch::Approx(1000.0 - 133.3333).epsilon(0.01));
@@ -870,11 +890,12 @@ TEST_CASE("Combat: target dies when damage exceeds HP", "[combat]") {
   // 1000 true damage → HP goes negative
   Type dealt =
       moba::mitigated_damage(1000.0, TypeDamage::True, target_base, 0.0, 0.0);
-  target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{
-        {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
-        false};
-  }));
+  target.addPassive(
+      factory().make([dealt](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{
+            {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
+            false};
+      }));
   Stats r = target.evaluateChampion();
   REQUIRE(r[std::to_underlying(Stat::CurrentHP)] <= 0.0);
   REQUIRE(r[std::to_underlying(Stat::CurrentHP)] == Catch::Approx(-900.0));
@@ -896,7 +917,8 @@ TEST_CASE("Combat: DoT via temp passive over time", "[combat]") {
        start = 0.0,
        duration = 3.0,
        next_tick = 0.0,
-       accumulated = 0.0](const Stats &, const Stats &, Type time) mutable {
+       accumulated =
+           0.0](const Stats &, const Stats &, Type time, const auto &) mutable {
         if (time >= next_tick && time < start + duration) {
           accumulated += per_tick;
           next_tick = time + 1.0;
@@ -943,22 +965,24 @@ TEST_CASE("Combat: two champions trade damage", "[combat]") {
                                            b_base,
                                            0.0,
                                            0.0);
-  b.addPassive(factory().make([dealt_to_b](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{
-        {{Stat::CurrentHP, ModType::Base, -dealt_to_b, {}}},
-        false};
-  }));
+  b.addPassive(factory().make(
+      [dealt_to_b](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{
+            {{Stat::CurrentHP, ModType::Base, -dealt_to_b, {}}},
+            false};
+      }));
   // b hits a: 40 physical vs 50 armor → 40*100/150 = 26.67
   Type dealt_to_a = moba::mitigated_damage(b_base[std::to_underlying(Stat::AD)],
                                            TypeDamage::Physical,
                                            a_base,
                                            0.0,
                                            0.0);
-  a.addPassive(factory().make([dealt_to_a](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{
-        {{Stat::CurrentHP, ModType::Base, -dealt_to_a, {}}},
-        false};
-  }));
+  a.addPassive(factory().make(
+      [dealt_to_a](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{
+            {{Stat::CurrentHP, ModType::Base, -dealt_to_a, {}}},
+            false};
+      }));
 
   Stats a_after = a.evaluateChampion();
   Stats b_after = b.evaluateChampion();
@@ -977,10 +1001,11 @@ TEST_CASE("Combat: armor shred debuff then damage", "[combat]") {
                              {Stat::MR, 50}};
 
   // First: armor shred (-30 armor) as permanent debuff
-  target.addPassive(factory().make([](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{{{Stat::AR, ModType::Base, -30.0, {}}},
-                                   true};
-  }));
+  target.addPassive(
+      factory().make([](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{{{Stat::AR, ModType::Base, -30.0, {}}},
+                                       true};
+      }));
   // After shred: 70 armor → 100*100/170 ≈ 58.82
   Stats shredded = target.evaluateChampion();
   REQUIRE(shredded[std::to_underlying(Stat::AR)] == Catch::Approx(70.0));
@@ -988,11 +1013,12 @@ TEST_CASE("Combat: armor shred debuff then damage", "[combat]") {
   // Now apply damage with the shredded armor
   Type dealt =
       moba::mitigated_damage(100.0, TypeDamage::Physical, shredded, 0.0, 0.0);
-  target.addPassive(factory().make([dealt](const Stats &, const Stats &, Type) {
-    return Champion::PassiveResult{
-        {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
-        false};
-  }));
+  target.addPassive(
+      factory().make([dealt](const Stats &, const Stats &, Type, const auto &) {
+        return Champion::PassiveResult{
+            {{Stat::CurrentHP, ModType::Base, -dealt, {}}},
+            false};
+      }));
   Stats r = target.evaluateChampion();
   REQUIRE(r[std::to_underlying(Stat::CurrentHP)] ==
           Catch::Approx(1000.0 - 58.8235).epsilon(0.01));
