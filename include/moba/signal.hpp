@@ -7,6 +7,9 @@
 
 namespace moba {
 
+// Typowany sygnał pub-sub. Subskrybenci są wołani synchronicznie przy emit().
+// Bezpieczny unsubscribe-during-emit: martwi listenery czyszczeni po outermost
+// emit. clear() — usuwa wszystkich natychmiast (do rozbijania cykli w Python).
 template <typename... Args> class Signal {
 public:
   using ListenerID = std::size_t;
@@ -49,7 +52,7 @@ private:
   };
   std::vector<Listener> listeners_;
   ListenerID next_id_ = 0;
-  int emit_depth_ = 0;
+  int emit_depth_ = 0; // >0 = jesteśmy w środku emit, nie czyść jeszcze
 };
 
 } // namespace moba
