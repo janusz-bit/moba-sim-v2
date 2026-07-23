@@ -1,5 +1,8 @@
 add_library(moba_sim STATIC
-    moba_sim.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mod_db.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/combat.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/champion.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/simulation.cpp
 )
 
 target_include_directories(moba_sim PUBLIC

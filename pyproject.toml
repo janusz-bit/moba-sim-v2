@@ -16,7 +16,7 @@ test = ["pytest>=7.0", "pytest-cov"]
 minimum-version = "build-system.requires"
 build-dir = "build/python"
 wheel.packages = ["python/moba"]
-cmake.args = ["-DMOBA_SIM_BUILD_TESTS=OFF"]
+cmake.args = ["-DMOBA_SIM_BUILD_TESTS=OFF", "-DMOBA_SIM_BUILD_PYTHON=ON"]
 
 [tool.pytest.ini_options]
 testpaths = ["python/tests"]
