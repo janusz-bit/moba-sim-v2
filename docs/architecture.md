@@ -88,8 +88,8 @@ Champion c{{Stat::MaxHP, 1000}, {Stat::AD, 50}, {Stat::AR, 100}};
 
 To dodaje modyfikatory `Base` do `mod_db` ze źródłem `"Base"`.
 
-`getBaseStats()` (`src/moba_sim.cpp:136`) ewaluuje pełny potok dla wszystkich
-statystyk — zwraca `Stats` bez passives.
+`getBaseStats()` ewaluuje pełny potok dla wszystkich statystyk — zwraca `Stats`
+bez passives.
 
 ---
 
@@ -98,7 +98,8 @@ statystyk — zwraca `Stats` bez passives.
 Passive to `std::function` z sygnaturą (`include/moba/champion.hpp:46`):
 
 ```cpp
-PassiveResult(const Stats &base, const Stats &final, const Type &time)
+PassiveResult(const Stats &base, const Stats &final, const Type &time,
+              const PassiveEvent &event)
 ```
 
 Otrzymuje:
@@ -106,18 +107,40 @@ Otrzymuje:
 - `base` — statystyki z `mod_db` (bez passives)
 - `final` — aktualny wynik (z poprzedniej iteracji)
 - `time` — czas symulacji (absolutny, rosnący)
+- `event` — event being dispatched, lub `std::monostate` dla normalnej ewaluacji
 
 Zwraca `PassiveResult` (`include/moba/champion.hpp:40`):
 
 - `mods` — wektor `Modifier` (Base/Inc/More — wpinają się w potok!)
+- `emitted_events` — wektor `PassiveEvent` do dispatchu po aktualnym kroku
+  (umożliwia chaining: pasywa reaguje na DamageReceived → emituje HealApplied)
 - `alive` — czy passive zostaje (`true`) czy jest usuwane (`false`)
 
-### 5.1. Typy passives — passive sama decyduje o swoim lifetime
+### 5.1. `PassiveEvent` — variant
+
+`PassiveEvent` (`include/moba/event.hpp:78`) to `std::variant`:
+
+```cpp
+using PassiveEvent = std::variant<
+    std::monostate,       // brak eventa — normalna ewaluacja (evaluateChampion)
+    AttackHit,
+    DamageDealt,
+    DamageReceived,
+    HealApplied,
+    Death
+>;
+```
+
+Gdy passive jest wołana z `monostate` — to normalna ewaluacja statystyk
+(jak w `evaluateChampion`). Gdy jest wołana z konkretnym eventem — może
+zareagować (np. dać shield na `DamageReceived`).
+
+### 5.2. Typy passives — passive sama decyduje o swoim lifetime
 
 **Permanent** — zawsze `alive=true`:
 
 ```cpp
-factory.make([](const Stats &, const Stats &, const Type &) {
+factory.make([](const Stats &, const Stats &, const Type &, const auto &) {
   return Champion::PassiveResult{
       {{Stat::AD, ModType::Inc, 0.2, {}}}, true};  // +20% AD na zawsze
 });
@@ -126,7 +149,7 @@ factory.make([](const Stats &, const Stats &, const Type &) {
 **One-shot** — `alive=false` po jednym zastosowaniu:
 
 ```cpp
-factory.make([](const Stats &, const Stats &, const Type &) {
+factory.make([](const Stats &, const Stats &, const Type &, const auto &) {
   return Champion::PassiveResult{
       {{Stat::AD, ModType::Base, 20.0, {}}}, false};  // +20 AD raz
 });
@@ -136,9 +159,21 @@ factory.make([](const Stats &, const Stats &, const Type &) {
 
 ```cpp
 factory.make(
-    [start = 2.0, duration = 3.0](const Stats &, const Stats &, const Type &time) {
+    [start = 2.0, duration = 3.0](const Stats &, const Stats &, const Type &time,
+                                  const auto &) {
       return Champion::PassiveResult{
           {{Stat::AD, ModType::Base, 10.0, {}}}, time - start < duration};
+    });
+```
+
+**Reaktywna** — reaguje na event (np. shield na DamageReceived):
+
+```cpp
+factory.make(
+    [](const Stats &, const Stats &, Type, const PassiveEvent &ev)
+        -> Champion::PassiveResult {
+      if (!std::holds_alternative<DamageReceived>(ev)) return {};
+      return {{{Stat::ShieldHP, ModType::Base, 200.0, {}}}, false};
     });
 ```
 
@@ -146,28 +181,22 @@ factory.make(
 
 ```cpp
 [per_tick = 40.0, accumulated = 0.0, next_tick = 0.0](
-    const Stats &, const Stats &, const Type &time) mutable {
+    const Stats &, const Stats &, const Type &time, const auto &) mutable {
   if (time >= next_tick) { accumulated += per_tick; next_tick = time + 1.0; }
   return Champion::PassiveResult{
       {{Stat::CurrentHP, ModType::Base, -accumulated, {}}}, time < 3.0};
 }
 ```
 
-### 5.2. ID passives — auto-increment
+### 5.3. ID passives — auto-increment
 
-`PassiveFactory::make()` (`include/moba/champion.hpp:75`) tworzy `PassiveEntry`
-z auto-incrementowanym ID. `addPassive` deduplikuje po ID — **ten sam ID =
-refresh** (zastąp passive), **nowy ID = dodaj**:
+`PassiveFactory::make()` tworzy `PassiveEntry` z auto-incrementowanym ID.
+`addPassive` deduplikuje po ID — **ten sam ID = refresh** (zastąp passive),
+**nowy ID = dodaj**:
 
 ```cpp
 Champion::PassiveFactory factory;
 champ.addPassive(factory.make(make_burn(0.0, 3.0)));  // insert (id=0)
-champ.addPassive(factory.make(make_burn(5.0, 5.0)));  // refresh? nie — nowy ID!
-```
-
-Aby odświeżyć ten sam slot, trzeba użyć tego samego ID:
-
-```cpp
 champ.addPassive(Champion::PassiveEntry{0, make_burn(5.0, 5.0)});  // refresh id=0
 ```
 
@@ -175,13 +204,12 @@ champ.addPassive(Champion::PassiveEntry{0, make_burn(5.0, 5.0)});  // refresh id
 
 ## 6. Jak `applyPassives` oblicza wynik
 
-`applyPassives(base, final, time)` (`src/moba_sim.cpp:154`) — jeden krok
-symulacji:
+`applyPassives(base, final, time)` — jeden krok symulacji:
 
 ```
 1. Skopiuj mod_db → working
 2. Dla każdej passive:
-   a. Wywołaj: passive(base, final, time) → result{mods, alive}
+   a. Wywołaj: passive(base, final, time, monostate) → result{mods, events, alive}
    b. Dodaj mods do working
    c. Jeśli alive=false → usuń passive z kolejki
 3. Zwróć statsFromModDB(working) — pełny potok Base/Inc/More
@@ -190,21 +218,17 @@ symulacji:
 Kluczowe: modyfikatory passives **wpinają się w potok** — passive `+10 AD`
 przy `Inc=0.2, More=1.5` daje `10 * 1.2 * 1.5 = 18`, nie płaskie `10`.
 
-Parametr `base` jest przekazywany do passives jako informacja — wynik jest
-obliczany z `mod_db + passive mods` przez potok, nie z `base + flat bonus`.
-
 ---
 
 ## 7. Jak `evaluateChampion` znajduje fixed-point
 
-`evaluateChampion(eps, max_iter, time)` (`src/moba_sim.cpp:180`) — rozwiązuje
-interakcje:
+`evaluateChampion(eps, max_iter, time)` — rozwiązuje interakcje:
 
 ```
 final = getBaseStats()
 repeat:
   prev = final
-  final = pipeline(mod_db + Σ passive(base, prev, time))   // bez usuwania
+  final = pipeline(mod_db + Σ passive(base, prev, time, monostate))   // bez usuwania
 until delta(final, prev) ≤ eps  or  iter ≥ max_iter
 then: usuń passives gdzie alive=false (z ostatniej iteracji)
 ```
@@ -217,14 +241,6 @@ Bo passive B może zależeć od `final`, który zawiera efekt passive A. Np.:
 - Passive 2: `HP += 0.5 * final[AD]`
 - AD zależy od HP, HP od AD — potrzebna iteracja do punktu stałego.
 
-### Przekazywanie czasu
-
-`time` jest przekazywany do passives — temp passive widzą czas symulacji:
-
-```cpp
-champ.evaluateChampion(0.001, 1000, 5.0);  // rozwiąż fixed-point przy t=5
-```
-
 ### ConvergenceError
 
 Gdy passive ma wagę ≥1 (rozbiega się, np. `bonus = 1.5 * final`).
@@ -233,15 +249,12 @@ Gdy passive ma wagę ≥1 (rozbiega się, np. `bonus = 1.5 * final`).
 
 Passives z `alive=false` są usuwane **dopiero po zbieżności**, nie w trakcie
 pętli — bo w trakcie pętli passives muszą być aplikowane wielokrotnie.
-Bonus z wygasającego passive jest still aplicowany w ostatniej iteracji,
-ale passive jest usuwana dla przyszłych wywołań.
 
 ---
 
 ## 8. Helpery dla obrażeń
 
 ### `mitigated_damage(raw, type, target, flat_pen, pct_pen)`
-(`src/moba_sim.cpp:214`)
 
 ```
 effective_resistance = (resistance - flat_pen) * (1 - pct_pen)
@@ -256,35 +269,22 @@ dla ujemnego AR (amplifikacja, max 200%):
 True damage omija mitigację całkowicie.
 
 ### `apply_damage_to_shield(shield, hp, mitigated)`
-(`src/moba_sim.cpp:239`)
 
 Shield absorbuje obrażenia przed HP. Zwraca
 `{shield_remaining, hp_remaining}`.
 
 - Jeśli `shield ≥ damage`: shield absorbuje wszystko, HP nietknięte
 - Jeśli `shield < damage`: shield = 0, HP traci resztę
-- Jeśli `damage ≤ 0`: nic się nie dzieje (negatywny damage nie leczy)
+- Jeśli `damage ≤ 0`: nic się nie dzieje
 
 ---
 
-## 9. Event system — `Signal` + typowane eventy
+## 9. Event system — `PassiveEvent` + `dispatchEvent` + observer signals
 
-### 9.1. `Signal<Args...>`
-
-`Signal` (`include/moba/signal.hpp:20`) to typowany sygnał — subskrybenci są
-powiadamiani gdy `emit()` jest wołane. Bezpieczne do unsubscribe-during-emit.
-
-```cpp
-Signal<int> s;
-auto id = s.subscribe([](int x) { /* ... */ });
-s.emit(42);        // wywołaj wszystkich subskrybentów
-s.unsubscribe(id);  // wyrejestruj
-```
-
-### 9.2. Typowane eventy
+### 9.1. `PassiveEvent` — typowany variant
 
 Zamiast jednego `GameEvent` z enumem, każdy event to osobny struct
-(`include/moba/event.hpp:19`):
+(`include/moba/event.hpp:19`), unified via `PassiveEvent` variant:
 
 ```cpp
 struct AttackHit      { actor_id, target_id, amount, damage_type, source, time };
@@ -292,48 +292,70 @@ struct DamageDealt    { actor_id, target_id, amount, damage_type, source, time }
 struct DamageReceived { actor_id, target_id, amount, damage_type, source, time };
 struct HealApplied    { target_id, amount, source, time };
 struct Death          { actor_id, target_id, source, time };
+
+using PassiveEvent = std::variant<std::monostate, AttackHit, DamageDealt,
+                                  DamageReceived, HealApplied, Death>;
 ```
 
 `amount` w `DamageDealt`/`DamageReceived` to wartość **post-mitigation**.
+`std::monostate` = brak eventa (normalna ewaluacja statów).
 
-### 9.3. `Simulation`
+### 9.2. `Simulation::dispatchEvent` — główny entry point
 
-`Simulation` (`include/moba/simulation.hpp:23`) to struct z:
+`Simulation` (`include/moba/simulation.hpp:45`) to struct z:
 
 - `champions` — `std::vector<Champion>` (wszyscy uczestnicy walki)
 - `onAttackHit`, `onDamageDealt`, `onDamageReceived`, `onHealApplied`, `onDeath`
-  — po jednym `Signal` per typ eventa
+  — observer `Signal`s (side-effect-free reakcje: logging, UI, meta)
+- `dispatchEvent(event, eps, max_iter)` — przetwarza event przez pełny pipeline
 
-Konstruktor `Simulation()` podpinaca **wewnętrzne handlery** które
-implementują reguły gry:
-
-```
-AttackHit      → oblicz mitigated_damage → emit DamageReceived + DamageDealt
-DamageReceived → aplikuj HP loss (shield absorbuje) → jeśli HP ≤ 0: emit Death
-HealApplied    → aplikuj HP gain (cap MaxHP)
-```
-
-Użytkownik subskrybuje swoje pasywy do tych samych sygnałów — reakcje
-łączą się z regułami frameworka.
-
-### 9.4. Efekty zwrotne (feedback)
-
-Subskrybent może emitować nowe eventy z poziomu handlera — wywołanie
-`emit()` na innym `Signal` natychmiast wyzwala jego subskrybentów (synchronicznie).
-Przykład łańcucha:
+`dispatchEvent` działa w 5 krokach:
 
 ```
-AttackHit → (wewnętrzny handler) → DamageDealt → (user handler: lifesteal)
-  → HealApplied → (wewnętrzny handler) → HP gain
+1. Internal game rules (std::visit na PassiveEvent):
+   AttackHit      → oblicz mitigated_damage → enqueue DamageReceived + DamageDealt
+   DamageDealt    → lifesteal (physical) + omnivamp (all) → enqueue HealApplied
+   DamageReceived → aplikuj HP loss (shield absorbuje) → jeśli HP ≤ 0: enqueue Death
+   HealApplied    → aplikuj HP gain (cap MaxHP)
+
+2. Observer signals (synchroniczne, side-effect-free):
+   onAttackHit.emit(ev), onDamageDealt.emit(ev), ...
+
+3. Broadcast do wszystkich pasyw wszystkich championów:
+   passive(base, final, time, event) → mods + emitted_events + alive
+   mods → mod_db, emitted_events → kolejka, alive=false → usuń
+
+4. Re-ewaluacja championów (fixed-point)
+
+5. Flush kolejki (chained events, aż do max_iter lub empty)
+```
+
+### 9.3. Efekty zwrotne (feedback) przez `emitted_events`
+
+Passive może zwrócić `emitted_events` w `PassiveResult`. Te eventy są
+kolejkowane i dispatchowane w kolejnych iteracjach. Przykład łańcucha:
+
+```
+AttackHit → (wewnętrzne reguły) → DamageReceived → (broadcast do pasyw)
+  → passive "Counter heal" emituje HealApplied → (kolejka)
+  → HealApplied → (wewnętrzne reguły) → HP gain
 ```
 
 To pozwala budować reakcje: atak → damage → counter-heal → ...
 
+### 9.4. Observer signals vs passive dispatch
+
+Dwa rozłączne mechanizmy:
+
+- **Pasywa** (`passive(base, final, time, event)`) — modyfikują statystyki,
+  uczestniczą w fixed-point, mogą emitować eventy. Jednolity system.
+- **Observer signals** (`sim.onDeath.subscribe(...)`) — side-effect-free,
+  synchroniczne, nie modyfikują statów. Dla logging, UI, meta-systems.
+
 ### 9.5. Source chain w eventach
 
-Wewnętrzny handler `AttackHit → DamageReceived` tworzy łańcuch provenance:
-source eventa damage ma `parent` wskazujący na source eventa attack. Dzięki
-temu subskrybenci widzą pełną historię:
+Wewnętrzna reguła `AttackHit → DamageReceived` tworzy łańcuch provenance:
+source eventa damage ma `parent` wskazujący na source eventa attack.
 
 ```cpp
 // ev.source.name           → "Damage"
@@ -347,38 +369,39 @@ temu subskrybenci widzą pełną historię:
 
 ```
 Simulation
-├── champions[]          ← lista championów
-├── onAttackHit          ← Signal<AttackHit>
-├── onDamageDealt        ← Signal<DamageDealt>
-├── onDamageReceived     ← Signal<DamageReceived>
-├── onHealApplied        ← Signal<HealApplied>
-├── onDeath              ← Signal<Death>
+├── champions[]              ← lista championów
+├── onAttackHit..onDeath      ← observer Signals (side-effect-free)
+├── event_queue_              ← kolejka PassiveEvent (chaining)
 │
-├── onAttackHit.emit({0, 1, 100.0, Physical, src, 0.0})
+├── dispatchEvent(AttackHit{0, 1, 100.0, Physical, src, 0.0})
 │
-└── [wewnętrzne handlery + user subskrybenci]:
-    │  1. AttackHit → mitigated_damage → DamageReceived + DamageDealt
-    │  2. DamageReceived → HP loss (shield absorbuje) → Death jeśli HP ≤ 0
-    │  3. HealApplied → HP gain (cap MaxHP)
-    │  4. User passives reagują na sygnały (lifesteal, shield proc, counter, ...)
-    │  5. User passives mogą emitować nowe eventy (feedback)
-    └── wszystko synchroniczne, kolejność = kolejność subskrypcji
+└── pipeline per event (loop):
+    │  1. Internal rules (std::visit):
+    │     AttackHit → mitigated_damage → DamageReceived + DamageDealt (enqueue)
+    │     DamageDealt → lifesteal + omnivamp → HealApplied (enqueue)
+    │     DamageReceived → HP loss (shield) → Death if HP ≤ 0 (enqueue)
+    │     HealApplied → HP gain (cap MaxHP)
+    │  2. Observer signals (synchroniczne)
+    │  3. Broadcast do pasyw: passive(base, final, time, event)
+    │     → mods → mod_db, emitted_events → kolejka, alive=false → usuń
+    │  4. Re-ewaluacja (fixed-point)
+    └── 5. Flush kolejki (następne eventy, aż do max_iter)
 
 Champion
 ├── mod_db          ← przedmioty, baza, runy (Base/Inc/More modyfikatory)
-├── passives        ← pasywne efekty (zwracają typed Modifier[])
+├── passives        ← pasywne efekty (zwracają typed Modifier[] + emitted_events)
 │
 ├── getBaseStats()  → Stats    [potok Base/Inc/More na mod_db]
 │
 ├── applyPassives(base, final, time)
 │   │  1. Skopiuj mod_db
-│   │  2. Dodaj mods od każdej passive
+│   │  2. Dodaj mods od każdej passive (z event=monostate)
 │   │  3. Usuń alive=false
 │   │  4. Zwróć pipeline(working_mod_db)
 │   └── → Stats
 │
 ├── evaluateChampion(eps, max_iter, time)
-│   │  Iteruje applyPassives do fixed-point
+│   │  Iteruje applyPassives do fixed-point (z event=monostate)
 │   │  Rzuca ConvergenceError jeśli nie zbieżne
 │   └── → Stats
 │
@@ -394,62 +417,52 @@ Champion
 ### Styl statyczny (bez eventów)
 
 ```cpp
-// 1. Stwórz championów
-Champion attacker{{Stat::MaxHP, 1800}, {Stat::AD, 320}, {Stat::AR, 80}, ...};
-Champion target{{Stat::MaxHP, 2800}, {Stat::AD, 180}, {Stat::AR, 120}, ...};
+Champion attacker{{Stat::MaxHP, 1800}, {Stat::AD, 320}, {Stat::AR, 80}};
+Champion target{{Stat::MaxHP, 2800}, {Stat::AD, 180}, {Stat::AR, 120}};
 
-// 2. Dodaj pasywne
+Champion::PassiveFactory factory;
 attacker.addPassive(factory.make(
-    [](const Stats &, const Stats &final, const Type &) {
+    [](const Stats &, const Stats &final, const Type &, const auto &) {
       return Champion::PassiveResult{
-          {{Stat::AD, ModType::Base, missing * 100.0, {}}}, true};
+          {{Stat::AD, ModType::Base, 100.0, {}}}, true};
     }));
 
-// 3. Rozwiąż statystyki
 Stats atk_stats = attacker.evaluateChampion();
 Stats tgt_stats = target.evaluateChampion();
-
-// 4. Oblicz obrażenia ręcznie
-Type dealt = mitigated_damage(atk_stats[AD], Physical, tgt_stats, ...);
-
-// 5. Persystuj stan ręcznie
-target.mod_db.replace(Stat::CurrentHP, Base, hp_left, Source{"Base", ""});
+Type dealt = mitigated_damage(getStat(atk_stats, Stat::AD),
+                              TypeDamage::Physical, tgt_stats);
+target.mod_db.replace(Stat::CurrentHP, ModType::Base,
+                      getStat(tgt_stats, Stat::CurrentHP) - dealt,
+                      Source{"Base", ""});
 ```
 
-### Styl z eventami (Signal)
+### Styl z eventami (dispatchEvent)
 
 ```cpp
-// 1. Stwórz Simulation
 Simulation sim;
-sim.champions.push_back(Champion{{Stat::MaxHP, 1000}, {Stat::CurrentHP, 1000},
+sim.champions.push_back(Champion{{Stat::MaxHP, 1000}, {Stat::CurrentHP, 800},
                                   {Stat::AD, 100}, {Stat::LifeSteal, 0.12}});
 sim.champions.push_back(Champion{{Stat::MaxHP, 1000}, {Stat::CurrentHP, 1000},
                                   {Stat::AR, 100}});
 
-// 2. Subskrybuj pasywy do sygnałów
-// Lifesteal: on DamageDealt → heal attacker
-sim.onDamageDealt.subscribe([&sim](const DamageDealt &ev) {
-  auto atk = sim.champions[ev.actor_id].getBaseStats();
-  Type heal = ev.amount * getStat(atk, Stat::LifeSteal);
-  sim.onHealApplied.emit({ev.actor_id, heal, Source{"Lifesteal", ""}, ev.time});
-});
+// Shield proc jako pasywa (nie signal subscription)
+sim.champions[1].addPassive(factory.make(
+    [](const Stats &, const Stats &, Type, const PassiveEvent &ev)
+        -> Champion::PassiveResult {
+      if (!std::holds_alternative<DamageReceived>(ev)) return {};
+      return {{{Stat::ShieldHP, ModType::Base, 200.0, {}}}, false};
+    }));
 
-// Shield proc: on DamageReceived → +200 shield
-sim.onDamageReceived.subscribe([&sim](const DamageReceived &ev) {
-  if (ev.target_id == 1)
-    sim.champions[1].mod_db.add(
-        Stat::ShieldHP, ModType::Base, 200.0, Source{"Sterak's Gage", ""});
-});
+// Observer: log deaths
+sim.onDeath.subscribe([](const Death &ev) { /* ... */ });
 
-// 3. Emituj attack event
-auto jinx = std::make_shared<Source>("Jinx", "champion");
-sim.onAttackHit.emit({0, 1, 100.0, TypeDamage::Physical,
-                      Source{"Basic attack", "auto", jinx}, 0.0});
+// Dispatch — lifesteal i omnivamp są wbudowane
+sim.dispatchEvent(AttackHit{0, 1, 100.0, TypeDamage::Physical,
+                            Source{"Basic attack"}, 0.0});
 
-// 4. Sprawdź wynik
 Stats t = sim.champions[1].getBaseStats();
 // t[CurrentHP] = 950 (50 damage mitigated)
-// t[ShieldHP] = 200 (shield proc)
+// t[ShieldHP] = 200 (shield proc via passive)
 ```
 
 ---
@@ -458,26 +471,25 @@ Stats t = sim.champions[1].getBaseStats();
 
 ```
 include/
-  moba_sim.hpp              Umbrella header (12 linii)
+  moba_sim.hpp              Umbrella header
   moba/
     types.hpp               Type, Stat, ModType, TypeDamage, ConvergenceError
     source.hpp              Source, SourcePtr
-    mod_db.hpp               Modifier, ModDB
-    event.hpp               AttackHit, DamageDealt, DamageReceived, HealApplied, Death
-    signal.hpp              Signal<Args...>
-    champion.hpp            Champion, Passive, PassiveResult, PassiveEntry, PassiveFactory
-    combat.hpp              mitigated_damage, apply_damage_to_shield, getStat/setStat
-    simulation.hpp          Simulation
-src/
-  moba_sim.cpp              Implementacja (324 linie)
+    mod_db.hpp              Modifier, ModDB
+    signal.hpp              Signal<Args...> (observer signals)
+    event.hpp               AttackHit, DamageDealt, ..., PassiveEvent variant
+    champion.hpp            Champion, Passive, PassiveResult, PassiveFactory
+    combat.hpp              mitigated_damage, apply_damage_to_shield, getStat
+    simulation.hpp          Simulation (dispatchEvent + internal rules)
+src/moba_sim.cpp            Implementacja
 tests/
   test_champion.cpp          Champion, passives, evaluateChampion
-  test_combat.cpp            Walka, obrażenia, penetracja, DoT, shield, lifesteal
+  test_combat.cpp            Walka, obrażenia, penetracja, DoT, shield
   test_scenarios.cpp         Scenariusze end-to-end
-  test_mod_db.cpp            ModDB, modyfikatory, predykaty
+  test_mod_db.cpp            ModDB
   test_post_mitigation_damage.cpp  Formuła pancerza
   test_champion_stats.cpp    Statystyki + edge cases + Source
-  test_events.cpp            Signal system, event chaining, Simulation
+  test_events.cpp            PassiveEvent, dispatchEvent, Simulation
 nix/default.nix              Flake: devShell, pre-commit, paczka, checks
 ```
 
@@ -487,6 +499,7 @@ nix/default.nix              Flake: devShell, pre-commit, paczka, checks
 nix develop          # dev shell z toolchain + hooks
 cmake -B build
 cmake --build build
-ctest --test-dir build           # 216 testów
+ctest --test-dir build           # 218 testów
+python3 -m pytest python/tests/  # 19 testów
 nix flake check                  # pre-commit + build + tests
 ```

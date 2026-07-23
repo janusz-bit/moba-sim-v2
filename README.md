@@ -2,8 +2,8 @@
 
 A C++23 library for simulating MOBA-style champion stat aggregation, inspired by
 [League of Legends](https://wiki.leagueoflegends.com/). Models the
-Base/Inc/More modifier pipeline, passive effects, and a signal-based event
-system for cross-champion combat. Includes Python bindings via [nanobind](https://github.com/wjakob/nanobind)
+Base/Inc/More modifier pipeline, passive effects, and a unified event-aware
+passive system for cross-champion combat. Includes Python bindings via [nanobind](https://github.com/wjakob/nanobind)
 and API documentation via [Doxygen](https://doxygen.nl/) + [Sphinx](https://www.sphinx-doc.org/).
 
 ## Build
@@ -71,11 +71,11 @@ include/
     types.hpp               Type, Stat, ModType, TypeDamage, ConvergenceError
     source.hpp              Source (provenance chain)
     mod_db.hpp              Modifier, ModDB
-    event.hpp               Typed event structs (AttackHit, DamageReceived, ...)
-    signal.hpp              Signal<Args...> (typed pub-sub)
+    signal.hpp              Signal<Args...> (observer signals)
+    event.hpp               Typed event structs + PassiveEvent variant
     champion.hpp            Champion, Passive, PassiveResult, PassiveFactory
     combat.hpp              mitigated_damage, apply_damage_to_shield, getStat
-    simulation.hpp          Simulation (signals + internal handlers)
+    simulation.hpp          Simulation (dispatchEvent + internal rules)
 src/moba_sim.cpp            Implementation
 python/
   moba_sim_ext.cpp          nanobind bindings (high-level API)
@@ -112,17 +112,20 @@ stats after the Base/Inc/More pipeline.
 A `Passive` is a `std::function` with signature:
 
 ```cpp
-PassiveResult(const Stats &base, const Stats &final, const Type &time)
-  -> { std::vector<Modifier> mods; bool alive; }
+PassiveResult(const Stats &base, const Stats &final, const Type &time,
+              const PassiveEvent &event)
+  -> { std::vector<Modifier> mods; std::vector<PassiveEvent> emitted_events; bool alive; }
 ```
 
-- Receives `base` (stats from `mod_db`), `final` (current result), and `time`
-  (absolute simulation time, starts at 0 and only increases).
-- Returns a list of typed `Modifier`s (each with `Stat`, `ModType`
-  Base/Inc/More, `value`, `source`) and an `alive` flag.
+- Receives `base` (stats from `mod_db`), `final` (current result), `time`
+  (absolute simulation time), and `event` (the event being dispatched, or
+  `std::monostate` for normal stat evaluation).
+- Returns a list of typed `Modifier`s, an optional list of `PassiveEvent`s to
+  chain, and an `alive` flag.
 - Passive mods are folded into a copy of `mod_db` and run through the full
-  Base/Inc/More pipeline, so a passive can express additive bonuses (Base),
-  percent increases (Inc), or multiplicative multipliers (More).
+  Base/Inc/More pipeline.
+- When `event` is a concrete event (e.g. `DamageReceived`), the passive can
+  react — e.g. grant shield, counter-heal, emit new events.
 
 A passive **is the sole authority on its lifetime** via the `alive` flag:
 
@@ -140,92 +143,84 @@ entry is appended.
 ## Event system
 
 Events are typed structs (`AttackHit`, `DamageDealt`, `DamageReceived`,
-`HealApplied`, `Death`), each carrying event-specific fields. `Simulation`
-owns one `Signal<EventType>` per event type. The constructor wires internal
-handlers that implement the core rules:
+`HealApplied`, `Death`), unified via `PassiveEvent` — a `std::variant` of
+`std::monostate` (no event, normal evaluation) and all event structs.
 
-```
-AttackHit      -> mitigated_damage -> emit DamageReceived + DamageDealt
-DamageDealt    -> lifesteal (physical) + omnivamp (all) -> emit HealApplied
-DamageReceived -> HP loss (shield absorbs) -> emit Death if HP <= 0
-HealApplied    -> HP gain (cap MaxHP)
-```
+`Simulation::dispatchEvent(event)` is the main entry point:
 
-Lifesteal and omnivamp are **built-in** — no manual signal subscription
-needed. LifeSteal heals the attacker for a percentage of physical damage
-dealt; Omnivamp heals from all damage types.
+1. **Internal game rules** (via `std::visit`):
+   - `AttackHit` -> mitigated damage -> enqueue `DamageReceived` + `DamageDealt`
+   - `DamageDealt` -> lifesteal (physical) + omnivamp (all) -> enqueue `HealApplied`
+   - `DamageReceived` -> HP loss (shield absorbs) -> enqueue `Death` if HP <= 0
+   - `HealApplied` -> HP gain (cap MaxHP)
+2. **Observer signals** — `Signal<EventType>` fires synchronously for
+   side-effect-free reactions (logging, UI, meta)
+3. **Broadcast to passives** — all passives of all champions receive the event;
+   their mods are folded into the pipeline, their `emitted_events` are enqueued
+4. **Re-evaluate** affected champions (fixed-point)
+5. **Flush queue** — chained events are processed iteratively (up to max_iter)
 
-User code subscribes to the same signals to react or chain new events:
-
-```cpp
-sim.onDamageReceived.subscribe([&](const DamageReceived &ev) {
-  // Shield proc, counter-attack, etc.
-  sim.champions[ev.target_id].mod_db.add(
-      Stat::ShieldHP, ModType::Base, 200.0, Source{"Sterak's Gage"});
-});
-sim.onAttackHit.emit({0, 1, 100.0, TypeDamage::Physical, Source{"Auto"}, 0.0});
-```
+Lifesteal and omnivamp are **built-in** — no manual subscription needed.
 
 ## Usage (C++)
 
-**Static champion** (no time):
+**Static champion** (no events):
 
 ```cpp
 Champion c{{Stat::MaxHP, 1000}, {Stat::AD, 50}, {Stat::AR, 100}};
 Champion::PassiveFactory factory;
-c.addPassive(factory.make([](const Stats &, const Stats &, const Type &) {
+c.addPassive(factory.make([](const Stats &, const Stats &, const Type &,
+                             const auto &) {
   return Champion::PassiveResult{
       {{Stat::AD, ModType::Base, 10.0, {}}}, true};  // permanent +10 AD
 }));
 Stats final = c.evaluateChampion();  // fixed-point of all passives
 ```
 
-**Temp passive** (e.g. a burn lasting 3 seconds):
+**Reactive passive** (shield on DamageReceived):
 
 ```cpp
 c.addPassive(factory.make(
-    [start = 2.0, duration = 3.0](const Stats &, const Stats &, const Type &time) {
+    [](const Stats &, const Stats &, Type, const PassiveEvent &ev)
+        -> Champion::PassiveResult {
+      if (!std::holds_alternative<DamageReceived>(ev)) return {};
+      return {{{Stat::ShieldHP, ModType::Base, 200.0, {}}}, false};
+    }));
+```
+
+**Temp passive** (burn lasting 3 seconds):
+
+```cpp
+c.addPassive(factory.make(
+    [start = 2.0, duration = 3.0](const Stats &, const Stats &, const Type &time,
+                                  const auto &) {
       return Champion::PassiveResult{
           {{Stat::AD, ModType::Base, 10.0, {}}}, time - start < duration};
     }));
 ```
 
-**One-shot passive** (e.g. a burst that fires once):
+**Simulation with events** (lifesteal is built-in):
 
 ```cpp
-c.addPassive(factory.make(
-    [](const Stats &, const Stats &, const Type &) {
-      return Champion::PassiveResult{
-          {{Stat::AD, ModType::Base, 20.0, {}}}, false};  // alive=false -> removed
+Simulation sim;
+sim.champions.push_back(Champion{{Stat::MaxHP, 1000}, {Stat::CurrentHP, 800},
+                                  {Stat::AD, 100}, {Stat::LifeSteal, 0.12}});
+sim.champions.push_back(Champion{{Stat::MaxHP, 1000}, {Stat::CurrentHP, 1000},
+                                  {Stat::AR, 100}});
+
+// Shield proc as a passive (not a signal subscription)
+sim.champions[1].addPassive(factory.make(
+    [](const Stats &, const Stats &, Type, const PassiveEvent &ev)
+        -> Champion::PassiveResult {
+      if (!std::holds_alternative<DamageReceived>(ev)) return {};
+      return {{{Stat::ShieldHP, ModType::Base, 200.0, {}}}, false};
     }));
-```
 
-**Inc/More passive** (e.g. +20% AD as Inc, *1.1 AD as More):
+// Observer: log deaths (side-effect-free)
+sim.onDeath.subscribe([](const Death &ev) { log(ev); });
 
-```cpp
-c.addPassive(factory.make(
-    [](const Stats &, const Stats &, const Type &) {
-      return Champion::PassiveResult{
-          {{Stat::AD, ModType::Inc, 0.2, {}},
-           {Stat::AD, ModType::More, 1.1, {}}},
-          true};
-    }));
-```
-
-To deal damage, use `mitigated_damage` to compute post-mitigation amount, then
-apply it as a negative `Base` mod for `CurrentHP`:
-
-```cpp
-Champion target{{Stat::MaxHP, 1000}, {Stat::CurrentHP, 1000}, {Stat::AR, 100}};
-
-Type dealt = moba::mitigated_damage(100.0, TypeDamage::Physical,
-                                    target.getBaseStats());
-target.addPassive(factory.make(
-    [dealt](const Stats &, const Stats &, const Type &) {
-      return Champion::PassiveResult{
-          {{Stat::CurrentHP, ModType::Base, -dealt, {}}}, false};  // one-shot
-    }));
-target.evaluateChampion();  // CurrentHP reduced by mitigated damage
+sim.dispatchEvent(AttackHit{0, 1, 100.0, TypeDamage::Physical,
+                            Source{"Basic attack"}, 0.0});
 ```
 
 - **Type damage** (physical/magic/true): `mitigated_damage` selects `AR`/`MR`
@@ -233,12 +228,11 @@ target.evaluateChampion();  // CurrentHP reduced by mitigated damage
 - **Penetration** (flat + %): `mitigated_damage(raw, type, target, flat, pct)`
   reduces effective resistance before mitigation.
 - **One-shot**: `alive=false` -> removed after applying.
-- **Lifesteal/heal**: a passive returning a positive `Base` mod for `CurrentHP`.
+- **Lifesteal/heal**: built into `Simulation`, heals the attacker automatically.
 - **DoT**: a temp passive that accumulates damage in captured state per tick.
 - **Armor shred**: a passive returning a negative `Base` mod for `AR` (debuff).
 
-See `tests/test_combat.cpp` for working examples (trades, penetration, DoT,
-lifesteal, shred, death).
+See `tests/test_combat.cpp` and `tests/test_events.cpp` for working examples.
 
 ## Usage (Python)
 
@@ -247,14 +241,15 @@ from moba import Champion, Simulation, Stat, ModType, TypeDamage, Source
 
 # Static champion
 c = Champion({Stat.MaxHP: 1000, Stat.AD: 50, Stat.AR: 100})
-c.add_passive(lambda base, final, time: [(Stat.AD, ModType.Base, 10.0)])
+c.add_passive(lambda base, final, time, event: [(Stat.AD, ModType.Base, 10.0)])
 print(c.evaluate_champion()[Stat.AD])  # 60.0
 
 # One-shot passive (dict result)
-c.add_passive(lambda b, f, t: {"mods": [(Stat.AD, ModType.Base, 25.0)], "alive": False})
+c.add_passive(lambda b, f, t, ev: {"mods": [(Stat.AD, ModType.Base, 25.0)],
+                                    "alive": False})
 print(c.evaluate_champion()[Stat.AD])  # 85.0, passive consumed
 
-# Simulation with events (lifesteal is built-in — no manual subscription)
+# Simulation with events (lifesteal is built-in)
 sim = Simulation()
 sim.add_champion(Champion({Stat.MaxHP: 1000, Stat.CurrentHP: 800,
                           Stat.AD: 100, Stat.LifeSteal: 0.12}))
@@ -268,10 +263,12 @@ print(sim.get_champion(1).get_base_stats()[Stat.CurrentHP])  # 950.0 (50 mitigat
 
 - **Stats** are returned as `numpy.ndarray` (float64, shape `[25]`), indexable
   by `Stat` enum values.
-- **Passives** accept Python callables: `callback(base, final, time) -> list | dict`.
-  List = `[(Stat, ModType, value, [Source]), ...]` (alive=True). Dict =
+- **Passives** accept Python callables: `callback(base, final, time, event) -> list | dict`.
+  `event` is `None` for normal evaluation, or an event object for reactive
+  dispatch. List = `[(Stat, ModType, value, [Source]), ...]` (alive=True). Dict =
   `{"mods": [...], "alive": bool}`.
-- **Signals**: `sim.on_*_subscribe(callback)` to react; `sim.emit_*()` to fire.
+- **Signals**: `sim.on_*_subscribe(callback)` for observers (logging, UI).
+  `sim.emit_attack_hit(...)` dispatches the full event pipeline.
 - **Lifesteal/Omnivamp**: built into `Simulation` — automatically heals the
   attacker based on `LifeSteal` (physical only) and `Omnivamp` (all types).
 - **TypeDamage.True_** is used instead of `True` (Python keyword).
